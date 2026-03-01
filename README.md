@@ -2,8 +2,16 @@
 
 An entirely client-sided, WebAssembly-powered AI agent running right in your browser.
 
-**License:** GNU General Public License v2.0
+**License:** Copyright © 2026 [yahya-azeem]. All Rights Reserved.
+License Terms:
+1. Permission is hereby granted to use, copy, and redistribute this software in its original, unmodified form for both commercial and non-commercial purposes, provided that the following conditions are met:
+2. Attribution: Proper credit is given to the original author ([yahya-azeem]) and the copyright notice above is included.
+3. No Modification: Modification, adaptation, translation, or creation of derivative works is strictly prohibited without prior written permission from the copyright holder.
+4. No Unauthorized Monetization: While the software may be used for commercial purposes (e.g., in a company's internal tools), the software itself may not be sold, sublicensed, or bundled for profit by any party other than the original author.
+5. Contributions and improvements are welcome and may be submitted to the original author for inclusion in official versions.
+6. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
 
+   
 ## 🌟 The Vision & Principles
 
 EZ-Claw is designed to be as **featured and functional as OpenClaw**, as **secure as IronClaw**, and as **efficient as ZeroClaw**, all while maintaining an accessible, beautiful interface for everyday users ("normies"). 
