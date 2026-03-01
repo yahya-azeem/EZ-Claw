@@ -68,11 +68,7 @@ jobs:
 
       - name: Build WASM
         run: |
-          echo "=== Current directory ==="
-          pwd
-          echo "=== crates dir ==="
-          ls -la crates/
-          echo "=== Building WASM ==="
+          export RUSTFLAGS="-C target-feature=+bulk-memory"
           npm run wasm:build 2>&1
 
       - name: Build Svelte
