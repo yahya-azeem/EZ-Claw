@@ -72,7 +72,10 @@ jobs:
           npm run wasm:build 2>&1
 
       - name: Build Svelte
-        run: npm run build
+        run: |
+          npm run build 2>&1
+          echo "=== Build output ==="
+          ls -la dist/ || echo "No dist folder!"
 
       - name: Configure Git
         run: |
