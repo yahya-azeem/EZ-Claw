@@ -16,6 +16,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Show directory structure
+        run: |
+          echo "=== Root ==="
+          ls -la
+          echo "=== crates dir ==="
+          ls -la crates/ || echo "No crates dir"
+
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
@@ -31,30 +38,42 @@ jobs:
         with:
           path: ~/.cargo/registry
           key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
 
       - name: Cache Cargo index
         uses: actions/cache@v3
         with:
           path: ~/.cargo/git
           key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
 
       - name: Cache target directory
         uses: actions/cache@v3
         with:
           path: crates/ezclaw-core/target
           key: ${{ runner.os }}-wasm-target-${{ hashFiles('crates/ezclaw-core/Cargo.lock') }}
-
-      - name: Install wasm-pack
-        run: cargo install wasm-pack
+          restore-keys: |
+            ${{ runner.os }}-wasm-target-
 
       - name: Generate Cargo.lock
         run: cd crates/ezclaw-core && cargo generate-lockfile
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack
 
       - name: Install dependencies
         run: npm install
 
       - name: Build WASM
-        run: npm run wasm:build
+        run: |
+          echo "=== Current directory ==="
+          pwd
+          echo "=== crates dir ==="
+          ls -la crates/
+          echo "=== Building WASM ==="
+          npm run wasm:build 2>&1
 
       - name: Build Svelte
         run: npm run build
