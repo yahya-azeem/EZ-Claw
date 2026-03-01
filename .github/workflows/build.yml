@@ -86,14 +86,14 @@ jobs:
 
       - name: Copy build output
         run: |
+          echo "=== Contents of dist ==="
+          ls -la dist/
+          echo "=== Copying ==="
+          rm -rf ./*
+          cp -a dist/. .
+          rm -rf dist
+          echo "=== After copy ==="
           ls -la
-          if [ -d "dist" ]; then
-            rm -rf ./*
-            cp -r dist/* .
-            rm -rf dist
-          else
-            echo "No dist folder, skipping copy"
-          fi
 
       - name: Commit and push
         run: |
