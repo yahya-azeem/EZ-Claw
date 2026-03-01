@@ -72,14 +72,7 @@ jobs:
           npm run wasm:build 2>&1
 
       - name: Build Svelte
-        run: |
-          npm run build
-
-      - name: Show dist contents
-        run: |
-          ls -la dist/
-          echo "=== pkg contents ==="
-          ls -la pkg/ || echo "No pkg folder"
+        run: npm run build
 
       - name: Configure Git
         run: |
@@ -93,9 +86,14 @@ jobs:
 
       - name: Copy build output
         run: |
-          rm -rf ./*
-          cp -r dist/* .
-          rm -rf dist
+          ls -la
+          if [ -d "dist" ]; then
+            rm -rf ./*
+            cp -r dist/* .
+            rm -rf dist
+          else
+            echo "No dist folder, skipping copy"
+          fi
 
       - name: Commit and push
         run: |
