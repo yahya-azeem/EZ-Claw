@@ -73,9 +73,13 @@ jobs:
 
       - name: Build Svelte
         run: |
-          npm run build 2>&1
-          echo "=== Build output ==="
-          ls -la dist/ || echo "No dist folder!"
+          npm run build
+
+      - name: Show dist contents
+        run: |
+          ls -la dist/
+          echo "=== pkg contents ==="
+          ls -la pkg/ || echo "No pkg folder"
 
       - name: Configure Git
         run: |
