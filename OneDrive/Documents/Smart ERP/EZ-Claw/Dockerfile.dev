@@ -1,0 +1,27 @@
+# Development Dockerfile with Rust + Node for hot-reload
+FROM rust:bookworm
+
+# Install Node.js 22
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs
+
+# Install wasm-pack
+RUN rustup target add wasm32-unknown-unknown \
+    && cargo install wasm-pack
+
+WORKDIR /app
+
+# Copy and install npm dependencies
+COPY package.json package-lock.json* ./
+RUN npm install
+
+# Copy source
+COPY . .
+
+# Build WASM to /app/pkg (outside src/ so volume mounts don't overwrite)
+RUN cd crates/ezclaw-core \
+    && wasm-pack build --target web --dev --out-dir ../../pkg
+
+EXPOSE 5173
+
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
