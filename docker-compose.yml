@@ -1,0 +1,25 @@
+services:
+  # Development with hot-reload
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./src:/app/src
+      - ./index.html:/app/index.html
+      - ./vite.config.ts:/app/vite.config.ts
+      - ./crates:/app/crates
+      # NOTE: ./pkg is NOT mounted — WASM is built inside the image
+      # and lives at /app/pkg. This avoids overwriting it.
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+
+  # Production static site
+  serve:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
