@@ -153,7 +153,7 @@
       // Step 3: When no tool_calls → stream the final text response
 
       let loopMessages = JSON.parse(builtMessagesJson);
-      let maxIterations = 5;
+      let maxIterations = 10;
 
       for (let i = 0; i < maxIterations; i++) {
         toolActivity = i > 0 ? 'Thinking...' : '';
