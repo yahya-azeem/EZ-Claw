@@ -86,13 +86,11 @@ jobs:
 
       - name: Copy build output
         run: |
-          echo "=== Contents of dist ==="
-          ls -la dist/
-          echo "=== Copying ==="
-          rm -rf ./*
-          cp -a dist/. .
-          rm -rf dist
-          echo "=== After copy ==="
+          mkdir -p _site
+          cp -r dist/* _site/
+          rm -rf .gitignore README.md LICENSE docker-compose.yml Dockerfile Dockerfile.dev CURRENT_STATE.md crates scripts src .github node_modules pkg .dockerignore package.json package-lock.json svelte.config.js tsconfig.json vite.config.ts index.html 2>/dev/null || true
+          cp -r _site/* .
+          rm -rf _site dist
           ls -la
 
       - name: Commit and push
