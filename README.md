@@ -49,18 +49,10 @@ EZ-Claw is designed to be as **featured and functional as OpenClaw**, as **secur
 
 
 
-### 4. Docker Deployment (Optional)
+### OR Docker Self Hosting Deployment (Optional)
 We provide a `docker-compose.yml` for quick isolated building.
 ```bash
 docker-compose build dev
 docker-compose up -d dev
 ```
 
----
-
-## 📖 Source Documentation Reference
-
-This project heavily references and adapts architectures from the Claw ecosystem:
-* **OpenClaw**: For the core agentic loop, SOUL.md personality injection, and dynamic tool-calling. (Source: https://github.com/openclaw/openclaw)
-* **IronClaw**: For sandbox tiering, safe shell execution policies, and secure tool routing. (Source: https://github.com/nearai/ironclaw)
-* **ZeroClaw**: For the client-side, zero-server efficiency model using WebAssembly.
