@@ -154,7 +154,7 @@
       const savedApiUrl = await getConfig("apiUrl");
 
       // Force reset to OpenRouter if provider is unknown or novita (which has issues)
-      const validProviders = ["deepseek", "openrouter", "openai", "anthropic", "ollama", "custom"];
+      const validProviders = ["deepseek", "openrouter", "openai", "anthropic", "ollama", "custom", "puter"];
       if (savedProvider && (!validProviders.includes(savedProvider) || savedProvider === "novita")) {
         console.warn(`[EZ-Claw] Invalid/unavailable provider "${savedProvider}", resetting to openrouter`);
         provider = "openrouter";
@@ -176,6 +176,7 @@
         anthropic: ["claude-3-5-sonnet-20241022", "claude-3-haiku-20240307"],
         ollama: ["llama3", "mistral", "codellama", "deepseek-coder-v2"],
         custom: [""],
+        puter: ["gpt-4o-mini", "gpt-4o", "claude-3-5-sonnet"],
       };
       const defaultModels: Record<string, string> = {
         deepseek: "deepseek-chat",
@@ -184,6 +185,7 @@
         anthropic: "claude-3-5-sonnet-20241022",
         ollama: "llama3",
         custom: "",
+        puter: "gpt-4o-mini",
       };
       
       const providerValidModels = validModels[provider] || [];

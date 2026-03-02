@@ -60,6 +60,12 @@
       defaultModel: "",
       free: false,
     },
+    {
+      id: "puter",
+      name: "Puter (User-Pays)",
+      defaultModel: "gpt-4o-mini",
+      free: false,
+    },
   ];
 
   function handleProviderChange() {
