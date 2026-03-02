@@ -199,9 +199,13 @@
         if (!choice) throw new Error('No response from model');
 
         const assistantMsg = choice.message;
+        
+        // Debug: log what we got
+        console.log('[EZ-Claw] Response:', JSON.stringify(assistantMsg));
 
         // Check for tool calls
         if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
+          console.log('[EZ-Claw] Tool calls detected:', assistantMsg.tool_calls);
           // Add the assistant message with tool_calls to the loop
           loopMessages.push(assistantMsg);
 
@@ -218,7 +222,9 @@
             let result: string;
             try {
               const args = JSON.parse(toolArgs);
+              console.log('[EZ-Claw] Executing tool:', toolName, args);
               result = await dispatchToolDirect(toolName, args);
+              console.log('[EZ-Claw] Tool result:', result.slice(0, 200));
             } catch (e: any) {
               result = `Error: ${e.message}`;
             }
