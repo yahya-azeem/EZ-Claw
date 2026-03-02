@@ -10,6 +10,7 @@ export default defineConfig({
     topLevelAwait(),
     svelte(),
   ],
+  base: './',
   resolve: {
     alias: {
       // Map @wasm to the pkg/ directory where wasm-pack outputs
