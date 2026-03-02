@@ -1,6 +1,0 @@
-node_modules/
-dist/
-target/
-src/lib/wasm/
-*.swp
-.DS_Store
