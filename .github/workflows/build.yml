@@ -28,10 +28,10 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install Rust and wasm64 target
+      - name: Install Rust and wasm32 target
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm64-unknown-unknown
+          targets: wasm32-unknown-unknown
 
       - name: Cache Cargo registry
         uses: actions/cache@v3

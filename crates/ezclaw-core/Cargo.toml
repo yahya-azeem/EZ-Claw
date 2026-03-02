@@ -30,5 +30,5 @@ lto = false
 codegen-units = 1
 strip = true
 
-[target.wasm64-unknown-unknown]
+[target.wasm32-unknown-unknown]
 rustflags = ["-C", "target-feature=+bulk-memory"]
