@@ -44,41 +44,15 @@ EZ-Claw is designed to be as **featured and functional as OpenClaw**, as **secur
 
 ---
 
-## 💻 Setup & Installation
+## How to use:
+   (click this link) -->  https://yahya-azeem.github.io/EZ-Claw/
 
-You need `Node.js` (for Vite/Svelte) and `Rust` + `wasm-pack` (for the core engine).
 
-### 1. Prerequisites
-* Install Node.js (v18+)
-* Install Rust (`rustup`)
-* Install wasm-pack: `cargo install wasm-pack`
 
-### 2. Build the WASM Core
-```bash
-cd crates/ezclaw-core
-wasm-pack build --target web --out-dir ../../pkg
-```
-
-### 3. Start the Frontend
-```bash
-# From the root of the project
-npm install
-npm run dev
-```
-Navigate to `http://localhost:5173` in your browser.
-
-### 4. Docker Deployment (Optional)
+### OR Docker Self Hosting Deployment (Optional)
 We provide a `docker-compose.yml` for quick isolated building.
 ```bash
 docker-compose build dev
 docker-compose up -d dev
 ```
 
----
-
-## 📖 Source Documentation Reference
-
-This project heavily references and adapts architectures from the Claw ecosystem:
-* **OpenClaw**: For the core agentic loop, SOUL.md personality injection, and dynamic tool-calling. (Source: https://github.com/openclaw/openclaw)
-* **IronClaw**: For sandbox tiering, safe shell execution policies, and secure tool routing. (Source: https://github.com/nearai/ironclaw)
-* **ZeroClaw**: For the client-side, zero-server efficiency model using WebAssembly.
