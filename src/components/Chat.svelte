@@ -137,6 +137,7 @@
       // Get tool definitions
       const toolRegistry = new (wasm as any).WasmToolRegistry();
       const toolsJson = toolRegistry.to_llm_json();
+      console.log('[EZ-Claw] Tools JSON:', toolsJson.slice(0, 500));
       toolRegistry.free();
 
       const providerConfig: ProviderConfig = {
