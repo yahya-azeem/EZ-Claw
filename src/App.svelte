@@ -177,7 +177,7 @@
         ollama: ["llama3", "mistral", "codellama", "deepseek-coder-v2"],
         custom: [""],
         puter: ["gpt-4o-mini", "gpt-4o", "claude-3-5-sonnet"],
-        zerogravity: ["claude-sonnet-4-20250514", "claude-opus-4-6-20251120", "claude-3-5-sonnet-20241022", "gemini-2.0-flash-exp", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+        zerogravity: ["opus-4.6", "sonnet-4.6", "gemini-3-flash", "gemini-3.1-pro", "gemini-3.1-pro-high", "gemini-3.1-pro-low", "gemini-3-pro-image"],
       };
       const defaultModels: Record<string, string> = {
         deepseek: "deepseek-chat",
@@ -187,7 +187,7 @@
         ollama: "llama3",
         custom: "",
         puter: "gpt-4o-mini",
-        zerogravity: "claude-sonnet-4-20250514",
+        zerogravity: "sonnet-4.6",
       };
       
       const providerValidModels = validModels[provider] || [];

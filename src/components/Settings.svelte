@@ -69,7 +69,7 @@
     {
       id: "zerogravity",
       name: "ZeroGravity (Antigravity)",
-      defaultModel: "claude-sonnet-4-20250514",
+      defaultModel: "sonnet-4.6",
       free: false,
     },
   ];
