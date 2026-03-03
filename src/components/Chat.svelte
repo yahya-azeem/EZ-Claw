@@ -83,12 +83,15 @@
     const text = inputText.trim();
     if (!text || isStreaming) return;
 
-    if (!apiKey) {
-      messages = [...messages, {
-        role: 'assistant',
-        content: '⚠️ **No API key configured.** Please open Settings and enter your API key to start chatting.'
-      }];
-      return;
+if (!apiKey) {
+      const noKeyProviders = ['zerogravity', 'ollama'];
+      if (!noKeyProviders.includes(provider)) {
+        messages = [...messages, {
+          role: 'assistant',
+          content: '⚠️ **No API key configured.** Please open Settings and enter your API key to start chatting.'
+        }];
+        return;
+      }
     }
 
     messages = [...messages, { role: 'user', content: text }];
