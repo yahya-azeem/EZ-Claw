@@ -177,7 +177,11 @@ const EZClaw: EZClawAPI = {
      */
     async chat(message: string, options?: ChatOptions): Promise<string> {
         if (!_wasm) throw new Error('EZClaw not initialized. Call init() first.');
-        if (!_config.apiKey) throw new Error('No API key configured. Call setConfig() first.');
+        
+        const noKeyProviders = ['zerogravity', 'ollama'];
+        if (!noKeyProviders.includes(_config.provider) && !_config.apiKey) {
+            throw new Error('No API key configured. Call setConfig() first.');
+        }
 
         const opt = {
             temperature: options?.temperature ?? _config.temperature,

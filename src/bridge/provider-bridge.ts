@@ -60,7 +60,7 @@ export async function streamChat(
     // Build endpoint URL
     const endpoint = `${baseUrl}/chat/completions`;
 
-    // Build headers
+// Build headers
     const headers: Record<string, string> = {
         'Content-Type': 'application/json',
     };
@@ -69,7 +69,9 @@ export async function streamChat(
     if (config.provider === 'anthropic') {
         headers['x-api-key'] = config.apiKey;
         headers['anthropic-version'] = '2023-06-01';
-    } else {
+    } else if (config.provider === 'zerogravity' || config.provider === 'ollama') {
+        // ZeroGravity and Ollama don't require auth header
+    } else if (config.apiKey) {
         headers['Authorization'] = `Bearer ${config.apiKey}`;
     }
 
@@ -182,14 +184,16 @@ export async function chatCompletion(
 
     const endpoint = `${baseUrl}/chat/completions`;
 
-    const headers: Record<string, string> = {
+const headers: Record<string, string> = {
         'Content-Type': 'application/json',
     };
 
     if (config.provider === 'anthropic') {
         headers['x-api-key'] = config.apiKey;
         headers['anthropic-version'] = '2023-06-01';
-    } else {
+    } else if (config.provider === 'zerogravity' || config.provider === 'ollama') {
+        // ZeroGravity and Ollama don't require auth header
+    } else if (config.apiKey) {
         headers['Authorization'] = `Bearer ${config.apiKey}`;
     }
 
