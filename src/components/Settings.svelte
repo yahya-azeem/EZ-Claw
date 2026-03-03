@@ -80,8 +80,11 @@
       localModel = selected.defaultModel;
 if (localProvider === "ollama") {
         localApiUrl = "http://localhost:11434/v1";
-      } else if (localProvider !== "custom" && localProvider !== "zerogravity") {
+      } else if (localProvider === "zerogravity") {
+        localApiUrl = "http://localhost:8741/v1";
+      } else if (localProvider !== "custom") {
         localApiUrl = "";
+      }
       }
     }
   }
