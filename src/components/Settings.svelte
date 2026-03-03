@@ -74,17 +74,18 @@
     },
   ];
 
-  function handleProviderChange() {
+function handleProviderChange() {
     const selected = providers.find((p) => p.id === localProvider);
     if (selected) {
       localModel = selected.defaultModel;
-if (localProvider === "ollama") {
+      if (localProvider === "ollama") {
         localApiUrl = "http://localhost:11434/v1";
       } else if (localProvider === "zerogravity") {
         localApiUrl = "http://localhost:8741/v1";
+      } else if (localProvider === "puter") {
+        localApiUrl = "https://api.puter.com/v1";
       } else if (localProvider !== "custom") {
         localApiUrl = "";
-      }
       }
     }
   }
@@ -226,6 +227,16 @@ if (localProvider === "ollama") {
             <option value="mistral">Mistral</option>
             <option value="codellama">Code Llama</option>
             <option value="deepseek-coder-v2">DeepSeek Coder V2</option>
+          {:else if localProvider === "zerogravity"}
+            <option value="sonnet-4.6">Claude Sonnet 4.6</option>
+            <option value="opus-4.6">Claude Opus 4.6</option>
+            <option value="gemini-3-flash">Gemini 3 Flash</option>
+            <option value="gemini-3.1-pro">Gemini 3.1 Pro</option>
+            <option value="gemini-3-pro-image">Gemini 3 Pro (Images)</option>
+          {:else if localProvider === "puter"}
+            <option value="gpt-4o-mini">GPT-4o Mini</option>
+            <option value="gpt-4o">GPT-4o</option>
+            <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>
           {/if}
         </datalist>
         <span class="field-hint"
@@ -251,7 +262,7 @@ if (localProvider === "ollama") {
         </div>
       </label>
 
-      {#if localProvider === "custom" || localProvider === "ollama"}
+      {#if localProvider === "custom" || localProvider === "ollama" || localProvider === "zerogravity" || localProvider === "puter"}
         <label class="field">
           <span class="field-label">API URL</span>
           <input
