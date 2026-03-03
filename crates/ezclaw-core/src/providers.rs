@@ -287,6 +287,7 @@ pub fn provider_base_url(provider: &str) -> String {
         "gemini" => "https://generativelanguage.googleapis.com/v1beta".into(),
         "ollama" => "http://localhost:11434/v1".into(),
         "puter" => "https://api.puter.com/v1".into(),
+        "zerogravity" => "http://localhost:8741/v1".into(),
         _ => {
             // Assume custom provider — URL comes from config
             String::new()
