@@ -66,15 +66,21 @@
       defaultModel: "gpt-4o-mini",
       free: false,
     },
+    {
+      id: "zerogravity",
+      name: "ZeroGravity (Antigravity)",
+      defaultModel: "claude-sonnet-4-20250514",
+      free: false,
+    },
   ];
 
   function handleProviderChange() {
     const selected = providers.find((p) => p.id === localProvider);
     if (selected) {
       localModel = selected.defaultModel;
-      if (localProvider === "ollama") {
+if (localProvider === "ollama") {
         localApiUrl = "http://localhost:11434/v1";
-      } else if (localProvider !== "custom") {
+      } else if (localProvider !== "custom" && localProvider !== "zerogravity") {
         localApiUrl = "";
       }
     }
