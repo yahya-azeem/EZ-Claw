@@ -121,7 +121,8 @@ if (!apiKey) {
         memoriesArr = recalled.map(m => `[${m.category}] ${m.key}: ${m.content}`);
       } catch { /* Memory not initialized yet */ }
 
-      // Build messages with WASM agent (includes system prompt + identity + memories)
+// Build messages with WASM agent (includes system prompt + identity + memories)
+      const cleanMessages = messages.filter(m => m && m.role && m.content);
       const agent = new (wasm as any).WasmAgent(JSON.stringify({
         default_provider: provider,
         default_model: model,
@@ -129,7 +130,7 @@ if (!apiKey) {
       }));
 
       const builtMessagesJson = agent.build_messages(
-        JSON.stringify(messages),
+        JSON.stringify(cleanMessages),
         JSON.stringify(memoriesArr),
         identityPrompt,
         new Date().toLocaleString(),
@@ -171,14 +172,16 @@ if (!apiKey) {
           toolsJson,
         );
 
-        let baseUrl = apiUrl || wasm.provider_base_url(provider);
+let baseUrl = apiUrl || wasm.provider_base_url(provider);
         const endpoint = `${baseUrl}/chat/completions`;
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
         if (provider === 'anthropic') {
           headers['x-api-key'] = apiKey;
           headers['anthropic-version'] = '2023-06-01';
-        } else {
+        } else if (provider === 'zerogravity' || provider === 'ollama') {
+          // No auth header needed
+        } else if (apiKey) {
           headers['Authorization'] = `Bearer ${apiKey}`;
         }
         if (provider === 'openrouter') {
