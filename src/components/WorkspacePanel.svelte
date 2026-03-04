@@ -3,6 +3,7 @@
      * WorkspacePanel — file browser + identity editor.
      * Lets users view/edit workspace files (SOUL.md, AGENTS.md, skills/, notes/).
      */
+    import { getWasm, type WasmWorkspaceInstance } from "../bridge/wasm-loader";
 
     interface DirEntry {
         name: string;
@@ -17,6 +18,7 @@
 
     let { isOpen, onClose }: Props = $props();
 
+    let workspace: WasmWorkspaceInstance | null = null;
     let currentPath = $state("/");
     let entries: DirEntry[] = $state([]);
     let selectedFile = $state("");
@@ -24,29 +26,46 @@
     let isEditing = $state(false);
     let editContent = $state("");
     let pathHistory: string[] = $state(["/"]);
+    let isLoading = $state(false);
 
-    // Simulated workspace data (will be connected to WasmWorkspace)
+    function initWorkspace() {
+        if (!workspace) {
+            const wasm = getWasm();
+            workspace = new wasm.WasmWorkspace();
+        }
+    }
+
     $effect(() => {
         if (isOpen) {
+            initWorkspace();
             loadDirectory(currentPath);
         }
     });
 
     function loadDirectory(path: string) {
-        // TODO: Connect to WasmWorkspace
-        // For now, show default structure
-        if (path === "/") {
-            entries = [
-                { name: "skills", is_dir: true, size: 0 },
-                { name: "notes", is_dir: true, size: 0 },
-                { name: "SOUL.md", is_dir: false, size: 156 },
-                { name: "AGENTS.md", is_dir: false, size: 98 },
-            ];
-        } else if (path === "/skills") {
+        if (!workspace) {
             entries = [];
-        } else if (path === "/notes") {
+            return;
+        }
+        
+        try {
+            const result = workspace.list_dir(path);
+            const parsed = JSON.parse(result);
+            if (parsed.error) {
+                console.error("[WorkspacePanel] Error:", parsed.error);
+                entries = [];
+            } else {
+                entries = parsed.map((e: any) => ({
+                    name: e.name,
+                    is_dir: e.is_dir,
+                    size: e.size || 0
+                }));
+            }
+        } catch (e) {
+            console.error("[WorkspacePanel] Failed to load directory:", e);
             entries = [];
         }
+        
         selectedFile = "";
         fileContent = "";
         isEditing = false;
@@ -74,15 +93,13 @@
             navigateTo(newPath);
         } else {
             selectedFile = entry.name;
-            // TODO: Read from WasmWorkspace
-            if (entry.name === "SOUL.md") {
-                fileContent =
-                    "# Agent Identity\n\nYou are EZ-Claw, a helpful and capable AI assistant.\nYou are thorough, honest, and security-conscious.\nYou run entirely in the user's browser — no data leaves without permission.\n";
-            } else if (entry.name === "AGENTS.md") {
-                fileContent =
-                    "# Workspace Instructions\n\nThis is your workspace. You can create files, notes, and skills here.\nAll data is stored locally on the user's device.\n";
-            } else {
-                fileContent = "(file content)";
+            if (workspace) {
+                const filePath = currentPath === "/" ? `/${entry.name}` : `${currentPath}/${entry.name}`;
+                try {
+                    fileContent = workspace.read_file(filePath);
+                } catch (e) {
+                    fileContent = "";
+                }
             }
         }
     }
@@ -93,9 +110,16 @@
     }
 
     function saveEdit() {
-        fileContent = editContent;
+        if (workspace && selectedFile) {
+            const filePath = currentPath === "/" ? `/${selectedFile}` : `${currentPath}/${selectedFile}`;
+            try {
+                workspace.write_file(filePath, editContent);
+                fileContent = editContent;
+            } catch (e) {
+                console.error("[WorkspacePanel] Failed to save:", e);
+            }
+        }
         isEditing = false;
-        // TODO: Write to WasmWorkspace
     }
 
     function cancelEdit() {

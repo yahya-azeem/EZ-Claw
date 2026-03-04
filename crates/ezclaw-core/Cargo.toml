@@ -29,6 +29,3 @@ opt-level = "z"
 lto = false
 codegen-units = 1
 strip = true
-
-[target.wasm32-unknown-unknown]
-rustflags = ["-C", "target-feature=+bulk-memory"]

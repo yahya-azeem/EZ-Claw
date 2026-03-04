@@ -19,9 +19,29 @@ interface EzClawWasm {
         from_json(json: string): WasmConfigInstance;
     };
 
-    // Agent
+// Agent
     WasmAgent: {
         new(config_json: string): WasmAgentInstance;
+    };
+
+    // Workspace
+    WasmWorkspace: {
+        new(): WasmWorkspaceInstance;
+    };
+
+    // Channel Router
+    WasmChannelRouter: {
+        new(): WasmChannelRouterInstance;
+    };
+
+    // Sandbox Manager
+    WasmSandboxManager: {
+        new(): WasmSandboxManagerInstance;
+    };
+
+    // Leak Scanner
+    WasmLeakScanner: {
+        new(): WasmLeakScannerInstance;
     };
 
     // Providers
@@ -112,8 +132,44 @@ interface WasmAgentInstance {
         tool_name: string,
         result: string
     ): string;
-    estimate_context_tokens(messages_json: string): number;
+estimate_context_tokens(messages_json: string): number;
     free(): void;
+}
+
+interface WasmWorkspaceInstance {
+    read_file(path: string): string;
+    write_file(path: string, content: string): void;
+    mkdir(path: string): void;
+    delete(path: string): void;
+    list_dir(path: string): string;
+    exists(path: string): boolean;
+    take_dirty_paths(): string;
+    export(): string;
+    import(json: string): void;
+}
+
+interface WasmChannelRouterInstance {
+    route_message(message_json: string): string;
+    register_channel(config_json: string): void;
+    active_routes(): string;
+    export_state(): string;
+    import_state(json: string): void;
+}
+
+interface WasmSandboxManagerInstance {
+    check_request(request_json: string): string;
+    check_response(tool_name: string, response: string): string;
+    set_policy(policy: string): void;
+    add_allowed_domain(domain: string, path: string, label: string): boolean;
+    register_secret(secret: string): void;
+    add_credential_mapping(json: string): void;
+}
+
+interface WasmLeakScannerInstance {
+    register_secret(secret: string): void;
+    scan(text: string): string;
+    has_leak(text: string): boolean;
+    set_enabled(enabled: boolean): void;
 }
 
 // Singleton WASM instance
@@ -157,4 +213,4 @@ export function isWasmReady(): boolean {
 }
 
 // Re-export types for TypeScript consumers
-export type { EzClawWasm, WasmConfigInstance, WasmAgentInstance };
+export type { EzClawWasm, WasmConfigInstance, WasmAgentInstance, WasmWorkspaceInstance, WasmChannelRouterInstance, WasmSandboxManagerInstance, WasmLeakScannerInstance };
