@@ -78,13 +78,16 @@ function handleProviderChange() {
     const selected = providers.find((p) => p.id === localProvider);
     if (selected) {
       localModel = selected.defaultModel;
+      localApiKey = "";
       if (localProvider === "ollama") {
         localApiUrl = "http://localhost:11434/v1";
       } else if (localProvider === "zerogravity") {
         localApiUrl = "http://localhost:8741/v1";
       } else if (localProvider === "puter") {
         localApiUrl = "https://api.puter.com/v1";
-      } else if (localProvider !== "custom") {
+      } else if (localProvider === "custom") {
+        localApiUrl = "";
+      } else {
         localApiUrl = "";
       }
     }
@@ -244,14 +247,14 @@ function handleProviderChange() {
         >
       </label>
 
-      <label class="field">
-        <span class="field-label">API Key</span>
+<label class="field">
+        <span class="field-label">API Key {localProvider === "zerogravity" || localProvider === "ollama" ? "(optional)" : ""}</span>
         <div class="api-key-wrapper">
           <input
             class="input"
             type={showApiKey ? "text" : "password"}
             bind:value={localApiKey}
-            placeholder="Enter your API key"
+            placeholder={localProvider === "zerogravity" || localProvider === "ollama" ? "Not required" : "Enter your API key"}
           />
           <button
             class="btn btn-ghost btn-sm"
@@ -260,17 +263,23 @@ function handleProviderChange() {
             {showApiKey ? "🙈" : "👁️"}
           </button>
         </div>
+        {#if localProvider === "zerogravity" || localProvider === "ollama"}
+          <span class="field-hint">Authentication handled locally</span>
+        {/if}
       </label>
 
-      {#if localProvider === "custom" || localProvider === "ollama" || localProvider === "zerogravity" || localProvider === "puter"}
+      {#if localProvider === "custom" || localProvider === "ollama" || localProvider === "zerogravity" || localProvider === "puter" || localProvider === "deepseek" || localProvider === "openrouter" || localProvider === "openai" || localProvider === "anthropic"}
         <label class="field">
-          <span class="field-label">API URL</span>
+          <span class="field-label">API URL {localProvider !== "custom" ? "(optional)" : ""}</span>
           <input
             class="input"
             type="text"
             bind:value={localApiUrl}
-            placeholder="https://api.example.com/v1"
+            placeholder={localProvider === "ollama" ? "http://localhost:11434/v1" : localProvider === "zerogravity" ? "http://localhost:8741/v1" : localProvider === "puter" ? "https://api.puter.com/v1" : "Leave empty to use default"}
           />
+          {#if !localApiUrl && localProvider !== "custom"}
+            <span class="field-hint">Using default: {localProvider === "deepseek" ? "https://api.deepseek.com/v1" : localProvider === "openrouter" ? "https://openrouter.ai/api/v1" : localProvider === "openai" ? "https://api.openai.com/v1" : localProvider === "anthropic" ? "https://api.anthropic.com/v1" : ""}</span>
+          {/if}
         </label>
       {/if}
 
