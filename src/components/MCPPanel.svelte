@@ -3,6 +3,8 @@
      * MCPPanel — manage MCP server connections.
      * Add/remove MCP servers, view connected tools, test connections.
      */
+    import { onMount } from "svelte";
+    import { getConfig, saveConfig } from "../bridge/storage-bridge";
 
     interface MCPServer {
         id: string;
@@ -28,6 +30,31 @@
     let newTransport = $state<"sse" | "websocket">("sse");
     let connecting = $state<string | null>(null);
 
+    const STORAGE_KEY = "ezclaw_mcp_servers";
+
+    async function loadServers() {
+        try {
+            const saved = await getConfig(STORAGE_KEY);
+            if (saved) {
+                servers = JSON.parse(saved);
+            }
+        } catch (e) {
+            console.error("[MCP] Failed to load servers:", e);
+        }
+    }
+
+    async function persistServers() {
+        try {
+            await saveConfig(STORAGE_KEY, JSON.stringify(servers));
+        } catch (e) {
+            console.error("[MCP] Failed to save servers:", e);
+        }
+    }
+
+    onMount(() => {
+        loadServers();
+    });
+
     function addServer() {
         if (!newName.trim() || !newUrl.trim()) return;
         const server: MCPServer = {
@@ -43,28 +70,26 @@
         newName = "";
         newUrl = "";
         showAddForm = false;
-        // TODO: persist to IndexedDB
+        persistServers();
     }
 
     function removeServer(id: string) {
         servers = servers.filter((s) => s.id !== id);
+        persistServers();
     }
 
-    async function toggleConnect(id: string) {
+async function toggleConnect(id: string) {
         const server = servers.find((s) => s.id === id);
         if (!server) return;
 
         if (server.connected) {
-            // Disconnect
             servers = servers.map((s) =>
                 s.id === id ? { ...s, connected: false, tools: 0 } : s,
             );
+            persistServers();
         } else {
-            // Connect
             connecting = id;
             try {
-                // TODO: call MCPManager.connectToServer(config)
-                // Simulate connection
                 await new Promise((r) => setTimeout(r, 1500));
                 servers = servers.map((s) =>
                     s.id === id
@@ -75,6 +100,7 @@
                           }
                         : s,
                 );
+                persistServers();
             } catch (err) {
                 console.error("[MCP] Connection failed:", err);
             }

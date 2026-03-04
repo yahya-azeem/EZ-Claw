@@ -1,7 +1,7 @@
 <script lang="ts">
     /**
      * SkillsPanel — browse, enable/disable, and create skills.
-     * Connects to WasmSkillRegistry for trust-gated skill management.
+     * Note: WasmSkillRegistry not yet implemented in Rust.
      */
 
     interface SkillInfo {
@@ -22,39 +22,7 @@
 
     let { isOpen, onClose }: Props = $props();
 
-    let skills: SkillInfo[] = $state([
-        {
-            name: "web-research",
-            description: "Search the web and summarize findings",
-            version: "1.0.0",
-            trust: "trusted",
-            source: "bundled",
-            enabled: true,
-            tags: ["search", "web"],
-            required_tools: ["web_search", "web_fetch"],
-        },
-        {
-            name: "code-assistant",
-            description: "Write, review, and debug code",
-            version: "1.0.0",
-            trust: "trusted",
-            source: "bundled",
-            enabled: true,
-            tags: ["coding", "programming"],
-            required_tools: ["read_file", "write_file", "list_dir"],
-        },
-        {
-            name: "note-taker",
-            description: "Take and organize notes in the workspace",
-            version: "1.0.0",
-            trust: "trusted",
-            source: "bundled",
-            enabled: true,
-            tags: ["notes", "memory"],
-            required_tools: ["write_file", "read_file", "memory_store"],
-        },
-    ]);
-
+    let skills: SkillInfo[] = $state([]);
     let showCreateForm = $state(false);
     let newSkillMd = $state(`---
 name: my-skill
@@ -71,13 +39,11 @@ Your skill instructions here.`);
         skills = skills.map((s) =>
             s.name === name ? { ...s, enabled: !s.enabled } : s,
         );
-        // TODO: call WasmSkillRegistry.set_enabled(name, !enabled)
     }
 
     function removeSkill(name: string) {
         if (skills.find((s) => s.name === name)?.source === "bundled") return;
         skills = skills.filter((s) => s.name !== name);
-        // TODO: call WasmSkillRegistry.unregister_skill(name)
     }
 
     function createSkill() {
