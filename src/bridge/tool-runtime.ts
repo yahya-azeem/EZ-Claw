@@ -17,6 +17,21 @@
 import type { WasmAgent, WasmAgentLoop, WasmWorkspace } from './wasm-loader';
 import { storeMemory, recallMemories, listMemories } from './memory-bridge';
 import { setFact, loadIdentity, updateIdentityField, saveIdentity, type AgentIdentity } from './identity-bridge';
+import { WASIContainer, type CommandResult } from './wasi-container';
+
+let _wasiContainer: WASIContainer | null = null;
+
+export async function getWasiContainer(): Promise<WASIContainer> {
+    if (!_wasiContainer) {
+        _wasiContainer = new WASIContainer();
+        await _wasiContainer.start();
+    }
+    return _wasiContainer;
+}
+
+export async function setWasiContainer(container: WASIContainer): Promise<void> {
+    _wasiContainer = container;
+}
 
 export interface ToolCallRequest {
     id: string;
@@ -206,7 +221,10 @@ async function dispatchTool(
         }
 
         case 'shell_exec':
-            return `Shell execution not available in current sandbox mode. Configure native CLI companion for shell access.`;
+            return await toolShellExec(args.command, args.args, args.cwd);
+
+        case 'run_shell_command':
+            return await toolRunShellCommand(args.command, args.args, args.env);
 
         default:
             throw new Error(`Unknown tool: ${name}`);
@@ -337,4 +355,62 @@ function toolListDir(workspace: WasmWorkspace, path: string): string {
     return entries
         .map((e: any) => `${e.is_dir ? '📁' : '📄'} ${e.name}${e.is_dir ? '/' : ` (${e.size}b)`}`)
         .join('\n');
+}
+
+/**
+ * Shell execution via WASI container.
+ */
+async function toolShellExec(command: string, args: string[] = [], cwd: string = '/workspace'): Promise<string> {
+    try {
+        const container = await getWasiContainer();
+        const result = await container.run(command, args);
+        return formatShellResult(result);
+    } catch (e: any) {
+        return `Shell execution error: ${e.message}`;
+    }
+}
+
+/**
+ * Run shell command - the primary tool for agent shell access.
+ */
+async function toolRunShellCommand(
+    command: string,
+    args: string[] = [],
+    env: Record<string, string> = {}
+): Promise<string> {
+    try {
+        const container = await getWasiContainer();
+        const fullCommand = args.length > 0 ? `${command} ${args.join(' ')}` : command;
+        const result = await container.run(command, args, env);
+        return formatShellResult(result);
+    } catch (e: any) {
+        return `Shell execution error: ${e.message}`;
+    }
+}
+
+/**
+ * Format shell result for agent consumption.
+ */
+function formatShellResult(result: CommandResult): string {
+    let output = '';
+    
+    if (result.stdout) {
+        output += result.stdout;
+    }
+    
+    if (result.stderr) {
+        output += (output ? '\n' : '') + `[stderr] ${result.stderr}`;
+    }
+    
+    output += (output ? '\n' : '') + `[exit code: ${result.exit_code}]`;
+    
+    return output;
+}
+
+/**
+ * Get WASI container info.
+ */
+export async function getContainerInfo(): Promise<any> {
+    const container = await getWasiContainer();
+    return container.getInfo();
 }

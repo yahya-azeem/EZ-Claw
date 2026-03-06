@@ -12,6 +12,8 @@
  * All tiers go through the WASM security pipeline before execution.
  */
 
+import { WASIContainer, detectArchitecture, type CommandResult } from './wasi-container';
+
 export type SandboxTier = 'wasi' | 'cheerpx' | 'native';
 
 export interface SandboxConfig {
@@ -52,97 +54,55 @@ const DEFAULT_CONFIG: SandboxConfig = {
  */
 class WasiSandbox {
     private config: SandboxConfig;
+    private container: WASIContainer | null = null;
+    private containerPromise: Promise<WASIContainer> | null = null;
 
     constructor(config: SandboxConfig) {
         this.config = config;
+    }
+
+    private async getContainer(): Promise<WASIContainer> {
+        if (this.container) return this.container;
+        
+        if (!this.containerPromise) {
+            this.containerPromise = this.initContainer();
+        }
+        
+        this.container = await this.containerPromise;
+        return this.container;
+    }
+
+    private async initContainer(): Promise<WASIContainer> {
+        const arch = await detectArchitecture();
+        const container = new WASIContainer();
+        
+        try {
+            const wasmPath = `/containers/alpine-${arch}.wasm`;
+            const loadedContainer = await WASIContainer.load(wasmPath);
+            await loadedContainer.start();
+            console.log('[WASI] Container loaded successfully');
+            return loadedContainer;
+        } catch (e) {
+            console.warn('[WASI] Failed to load WASM, using fallback shell:', e);
+            await container.start();
+            return container;
+        }
     }
 
     async execute(command: string): Promise<ShellResult> {
         const start = performance.now();
 
         try {
-            // WASI sandbox runs compiled-to-WASM utilities
-            // For now, support basic commands natively
-            const parts = command.trim().split(/\s+/);
-            const cmd = parts[0];
-            const args = parts.slice(1);
-
-            let stdout = '';
-            let stderr = '';
-            let exitCode = 0;
-
-            switch (cmd) {
-                case 'echo':
-                    stdout = args.join(' ') + '\n';
-                    break;
-
-                case 'pwd':
-                    stdout = this.config.cwd + '\n';
-                    break;
-
-                case 'date':
-                    stdout = new Date().toISOString() + '\n';
-                    break;
-
-                case 'whoami':
-                    stdout = 'ezclaw-agent\n';
-                    break;
-
-                case 'uname':
-                    stdout = 'EZ-Claw WASI Sandbox v1.0 (wasm32)\n';
-                    break;
-
-                case 'env':
-                    stdout = [
-                        'SHELL=/bin/wasi-sh',
-                        'HOME=/',
-                        'USER=ezclaw-agent',
-                        `PWD=${this.config.cwd}`,
-                        'TERM=xterm-256color',
-                        'SANDBOX=wasi',
-                    ].join('\n') + '\n';
-                    break;
-
-                case 'cat':
-                    if (args.length === 0) {
-                        stderr = 'cat: missing operand\n';
-                        exitCode = 1;
-                    } else {
-                        // Would read from OPFS workspace
-                        stderr = `cat: ${args[0]}: use workspace tools instead\n`;
-                        exitCode = 1;
-                    }
-                    break;
-
-                case 'ls':
-                    // Would list from OPFS workspace
-                    stdout = '(use list_dir tool for workspace files)\n';
-                    break;
-
-                case 'help':
-                    stdout = [
-                        'EZ-Claw WASI Sandbox — Available commands:',
-                        '  echo, pwd, date, whoami, uname, env, help',
-                        '  ls, cat (redirect to workspace tools)',
-                        '',
-                        'For full shell access, upgrade to CheerpX or Native CLI tier.',
-                        '',
-                    ].join('\n');
-                    break;
-
-                default:
-                    stderr = `wasi-sh: ${cmd}: command not available in WASI sandbox\n`;
-                    stderr += 'Tip: use CheerpX tier for full Linux shell, or Native CLI for host access.\n';
-                    exitCode = 127;
-            }
-
+            const container = await this.getContainer();
+            const result: CommandResult = await container.run(command);
+            
             return {
-                exitCode,
-                stdout: stdout.slice(0, this.config.maxOutputBytes),
-                stderr: stderr.slice(0, this.config.maxOutputBytes),
+                exitCode: result.exit_code,
+                stdout: result.stdout.slice(0, this.config.maxOutputBytes),
+                stderr: result.stderr.slice(0, this.config.maxOutputBytes),
                 durationMs: performance.now() - start,
                 timedOut: false,
-                truncated: stdout.length > this.config.maxOutputBytes,
+                truncated: result.stdout.length > this.config.maxOutputBytes,
             };
         } catch (err: any) {
             return {
@@ -154,6 +114,15 @@ class WasiSandbox {
                 truncated: false,
             };
         }
+    }
+
+    async mountWorkspace(handle: FileSystemDirectoryHandle): Promise<void> {
+        const container = await this.getContainer();
+        await container.mount('/workspace', handle);
+    }
+
+    getContainerInfo() {
+        return this.container?.getInfo();
     }
 }
 
@@ -431,5 +400,20 @@ export class SandboxManager {
             case 'native':
                 return { tier: 'native', available: this.native.isConnected, info: this.native.isConnected ? 'Connected to companion' : 'Not connected' };
         }
+    }
+
+    /** Mount workspace directory to WASI container. */
+    async mountWorkspace(handle: FileSystemDirectoryHandle): Promise<void> {
+        if (this.config.tier === 'wasi') {
+            await (this.wasi as any).mountWorkspace(handle);
+        }
+    }
+
+    /** Get container info for WASI tier. */
+    getContainerInfo(): any {
+        if (this.config.tier === 'wasi') {
+            return (this.wasi as any).getContainerInfo?.();
+        }
+        return null;
     }
 }

@@ -66,6 +66,14 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Download WASM containers
+        run: |
+          mkdir -p containers public/containers
+          if [ ! -f "containers/alpine-amd64.wasm" ]; then
+            curl -L "https://raw.githubusercontent.com/ktock/demo-images/main/amd64-vim-wasi-container00.wasm" -o containers/alpine-amd64.wasm
+          fi
+          cp containers/*.wasm public/containers/
+
       - name: Build WASM
         run: |
           export RUSTFLAGS="-C target-feature=+bulk-memory"
@@ -90,6 +98,10 @@ jobs:
           cp -r dist/* _site/
           if [ -d "public" ]; then
             cp -r public/* _site/
+          fi
+          if [ -d "containers" ]; then
+            mkdir -p _site/containers
+            cp -r containers/*.wasm _site/containers/
           fi
           rm -rf .gitignore README.md LICENSE docker-compose.yml Dockerfile Dockerfile.dev CURRENT_STATE.md crates scripts src .github node_modules pkg .dockerignore package.json package-lock.json svelte.config.js tsconfig.json vite.config.ts index.html 2>/dev/null || true
           cp -r _site/* .

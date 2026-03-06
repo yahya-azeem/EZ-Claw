@@ -1,0 +1,18 @@
+ARG BASE_IMAGE=alpine:3.19
+ARG TARGET_ARCH=amd64
+
+FROM --platform=linux/${TARGET_ARCH} ${BASE_IMAGE}
+
+RUN apk add --no-cache curl wget
+
+ARG TARGET_ARCH
+ENV TARGET_ARCH=${TARGET_ARCH}
+
+RUN C2W_VERSION="v0.8.3" && \
+    curl -L "https://github.com/container2wasm/container2wasm/releases/download/${C2W_VERSION}/container2wasm-${C2W_VERSION}-linux-amd64.tar.gz" -o /tmp/c2w.tar.gz && \
+    tar -xzf /tmp/c2w.tar.gz -C /tmp/ && \
+    mv /tmp/c2w /usr/local/bin/ && \
+    chmod +x /usr/local/bin/c2w && \
+    rm -f /tmp/c2w.tar.gz
+
+CMD ["c2w", "--help"]
