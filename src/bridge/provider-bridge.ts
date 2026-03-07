@@ -7,6 +7,7 @@
  */
 
 import { getWasm } from './wasm-loader';
+import { buildProviderHeaders } from './providers';
 
 export interface StreamCallbacks {
     onChunk: (text: string) => void;
@@ -58,28 +59,12 @@ export async function streamChat(
     }
 
     // Build endpoint URL
+    // NOTE: Anthropic's native API uses /v1/messages (not /chat/completions).
+    // This works when apiUrl points at an OpenAI-compatible proxy or gateway.
     const endpoint = `${baseUrl}/chat/completions`;
 
-// Build headers
-    const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-    };
-
-    // Provider-specific auth headers
-    if (config.provider === 'anthropic') {
-        headers['x-api-key'] = config.apiKey;
-        headers['anthropic-version'] = '2023-06-01';
-    } else if (config.provider === 'zerogravity' || config.provider === 'ollama') {
-        // ZeroGravity and Ollama don't require auth header
-    } else if (config.apiKey) {
-        headers['Authorization'] = `Bearer ${config.apiKey}`;
-    }
-
-    // OpenRouter requires extra headers
-    if (config.provider === 'openrouter') {
-        headers['HTTP-Referer'] = window.location.origin;
-        headers['X-Title'] = 'EZ-Claw';
-    }
+// Build headers using centralized helper
+    const headers = buildProviderHeaders(config.provider, config.apiKey);
 
     try {
         const response = await fetch(endpoint, {
@@ -184,23 +169,7 @@ export async function chatCompletion(
 
     const endpoint = `${baseUrl}/chat/completions`;
 
-const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-    };
-
-    if (config.provider === 'anthropic') {
-        headers['x-api-key'] = config.apiKey;
-        headers['anthropic-version'] = '2023-06-01';
-    } else if (config.provider === 'zerogravity' || config.provider === 'ollama') {
-        // ZeroGravity and Ollama don't require auth header
-    } else if (config.apiKey) {
-        headers['Authorization'] = `Bearer ${config.apiKey}`;
-    }
-
-    if (config.provider === 'openrouter') {
-        headers['HTTP-Referer'] = window.location.origin;
-        headers['X-Title'] = 'EZ-Claw';
-    }
+const headers = buildProviderHeaders(config.provider, config.apiKey);
 
     const response = await fetch(endpoint, {
         method: 'POST',

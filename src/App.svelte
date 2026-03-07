@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import Header from "./components/Header.svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import Chat from "./components/Chat.svelte";
@@ -14,6 +14,7 @@
   import PersonaManager from "./components/PersonaManager.svelte";
   import { initWasm, isWasmReady } from "./bridge/wasm-loader";
   import "./bridge/agent-api"; // Expose window.EZClaw headless API
+  import { isValidProvider, getValidModels, getDefaultModel } from "./bridge/providers";
   import {
     initStorage,
     getAllSessions,
@@ -52,37 +53,55 @@
   let temperature = $state(0.7);
   let apiUrl = $state("");
 
-  // ── Memory persistence helpers ──
-  const MEMORY_DB_KEY = "ezclaw_memory_db";
+  // ── Memory persistence helpers (using IndexedDB to avoid localStorage 5MB limit) ──
+  const MEMORY_DB_NAME = "ezclaw_memory_db";
+  const MEMORY_DB_STORE = "memory";
+  const MEMORY_DB_KEY = "ezclaw_memory";
+  let memoryAutoSaveId: number | undefined;
+
+  function openMemoryDB(): Promise<IDBDatabase> {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(MEMORY_DB_NAME, 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(MEMORY_DB_STORE)) {
+          db.createObjectStore(MEMORY_DB_STORE);
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
 
   async function loadSavedMemory(): Promise<Uint8Array | null> {
     try {
-      const stored = localStorage.getItem(MEMORY_DB_KEY);
-      if (stored) {
-        // Decode base64 → Uint8Array
-        const binary = atob(stored);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-          bytes[i] = binary.charCodeAt(i);
-        }
-        return bytes;
-      }
+      const db = await openMemoryDB();
+      const tx = db.transaction(MEMORY_DB_STORE, "readonly");
+      const store = tx.objectStore(MEMORY_DB_STORE);
+      const request = store.get(MEMORY_DB_KEY);
+      const result = await new Promise<any>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      db.close();
+      return result || null;
     } catch {
-      /* no saved memory */
+      return null;
     }
-    return null;
   }
 
   async function persistMemory(): Promise<void> {
     try {
       const data = exportMemoryData();
       if (data) {
-        // Encode Uint8Array → base64
-        let binary = "";
-        for (let i = 0; i < data.length; i++) {
-          binary += String.fromCharCode(data[i]);
-        }
-        localStorage.setItem(MEMORY_DB_KEY, btoa(binary));
+        const db = await openMemoryDB();
+        const tx = db.transaction(MEMORY_DB_STORE, "readwrite");
+        tx.objectStore(MEMORY_DB_STORE).put(data, MEMORY_DB_KEY);
+        await new Promise<void>((resolve, reject) => {
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+        db.close();
       }
     } catch {
       /* silent */
@@ -92,20 +111,15 @@
   // Persist memory on page unload
   if (typeof window !== "undefined") {
     window.addEventListener("beforeunload", () => {
-      try {
-        const data = exportMemoryData();
-        if (data) {
-          let binary = "";
-          for (let i = 0; i < data.length; i++) {
-            binary += String.fromCharCode(data[i]);
-          }
-          localStorage.setItem(MEMORY_DB_KEY, btoa(binary));
-        }
-      } catch {
-        /* silent */
-      }
+      // Synchronous fallback — IndexedDB can't be guaranteed to complete on unload,
+      // but the 30s auto-save ensures minimal data loss.
+      persistMemory();
     });
   }
+
+  onDestroy(() => {
+    if (memoryAutoSaveId) clearInterval(memoryAutoSaveId);
+  });
 
   onMount(async () => {
     try {
@@ -128,7 +142,7 @@
             await initMemory();
           }
           // Auto-save memory every 30 seconds
-          setInterval(persistMemory, 30000);
+          memoryAutoSaveId = setInterval(persistMemory, 30000) as unknown as number;
         } catch (memErr) {
           console.warn("[EZ-Claw] Memory init failed:", memErr);
           // Try fresh init
@@ -154,8 +168,7 @@
       const savedApiUrl = await getConfig("apiUrl");
 
       // Force reset to OpenRouter if provider is unknown or novita (which has issues)
-      const validProviders = ["deepseek", "openrouter", "openai", "anthropic", "ollama", "custom", "puter", "zerogravity"];
-      if (savedProvider && (!validProviders.includes(savedProvider) || savedProvider === "novita")) {
+      if (savedProvider && (!isValidProvider(savedProvider) || savedProvider === "novita")) {
         console.warn(`[EZ-Claw] Invalid/unavailable provider "${savedProvider}", resetting to openrouter`);
         provider = "openrouter";
         await saveConfig("provider", provider);
@@ -169,32 +182,11 @@
       if (savedApiUrl) apiUrl = savedApiUrl;
 
       // Validate model for provider - reset to default if invalid
-      const validModels: Record<string, string[]> = {
-        deepseek: ["deepseek-chat", "deepseek-reasoner"],
-        openrouter: ["deepseek/deepseek-chat", "deepseek/deepseek-r1", "google/gemini-2.0-flash-exp:free", "meta-llama/llama-3.3-70b-instruct:free", "qwen/qwen-2.5-72b-instruct:free", "anthropic/claude-3.5-sonnet", "openai/gpt-4o"],
-        openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
-        anthropic: ["claude-3-5-sonnet-20241022", "claude-3-haiku-20240307"],
-        ollama: ["llama3", "mistral", "codellama", "deepseek-coder-v2"],
-        custom: [""],
-        puter: ["gpt-4o-mini", "gpt-4o", "claude-3-5-sonnet"],
-        zerogravity: ["opus-4.6", "sonnet-4.6", "gemini-3-flash", "gemini-3.1-pro", "gemini-3.1-pro-high", "gemini-3.1-pro-low", "gemini-3-pro-image"],
-      };
-      const defaultModels: Record<string, string> = {
-        deepseek: "deepseek-chat",
-        openrouter: "deepseek/deepseek-chat",
-        openai: "gpt-4o-mini",
-        anthropic: "claude-3-5-sonnet-20241022",
-        ollama: "llama3",
-        custom: "",
-        puter: "gpt-4o-mini",
-        zerogravity: "sonnet-4.6",
-      };
-      
-      const providerValidModels = validModels[provider] || [];
-      const isValidModel = providerValidModels.some(m => model?.includes(m.split("/").pop() || m));
-      if (!isValidModel && model) {
+      const providerValidModels = getValidModels(provider);
+      const isValid = providerValidModels.length === 0 || providerValidModels.some(m => model?.includes(m.split("/").pop() || m));
+      if (!isValid && model) {
         console.warn(`[EZ-Claw] Invalid model "${model}" for provider "${provider}", resetting to default`);
-        model = defaultModels[provider] || "deepseek/deepseek-chat";
+        model = getDefaultModel(provider);
         await saveConfig("model", model);
       }
 

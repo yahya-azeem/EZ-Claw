@@ -14,7 +14,7 @@
  * - shell_exec: Sandboxed shell (requires permission)
  */
 
-import type { WasmAgent, WasmAgentLoop, WasmWorkspace } from './wasm-loader';
+import type { WasmAgentInstance as WasmAgent, WasmWorkspaceInstance as WasmWorkspace } from './wasm-loader';
 import { storeMemory, recallMemories, listMemories } from './memory-bridge';
 import { setFact, loadIdentity, updateIdentityField, saveIdentity, type AgentIdentity } from './identity-bridge';
 import { WASIContainer, type CommandResult } from './wasi-container';
@@ -393,17 +393,17 @@ async function toolRunShellCommand(
  */
 function formatShellResult(result: CommandResult): string {
     let output = '';
-    
+
     if (result.stdout) {
         output += result.stdout;
     }
-    
+
     if (result.stderr) {
         output += (output ? '\n' : '') + `[stderr] ${result.stderr}`;
     }
-    
+
     output += (output ? '\n' : '') + `[exit code: ${result.exit_code}]`;
-    
+
     return output;
 }
 

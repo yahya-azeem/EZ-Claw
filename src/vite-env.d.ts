@@ -7,6 +7,7 @@ declare module '@wasm/ezclaw_core.js' {
     export function version(): string;
     export function health_check(): boolean;
     export function build_provider_request(messages: string, model: string, temp: number, stream: boolean): string;
+    export function build_provider_request_with_tools(messages: string, model: string, temp: number, stream: boolean, tools: string): string;
     export function parse_sse_line(line: string): string;
     export function provider_base_url(provider: string): string;
     export function memory_create_table_sql(): string;
@@ -36,6 +37,13 @@ declare module '@wasm/ezclaw_core.js' {
         parse_tool_calls(response: string): string;
         format_tool_result(id: string, name: string, result: string): string;
         estimate_context_tokens(messages: string): number;
+        check_tool_security(tool_name: string, args_json: string, target_url: string): string;
+        secure_tool_response(tool_name: string, output: string): string;
+        free(): void;
+    }
+    export class WasmToolRegistry {
+        constructor();
+        to_llm_json(): string;
         free(): void;
     }
 }

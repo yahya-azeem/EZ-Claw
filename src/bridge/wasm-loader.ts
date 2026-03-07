@@ -19,7 +19,7 @@ interface EzClawWasm {
         from_json(json: string): WasmConfigInstance;
     };
 
-// Agent
+    // Agent
     WasmAgent: {
         new(config_json: string): WasmAgentInstance;
     };
@@ -60,6 +60,11 @@ interface EzClawWasm {
     ): string;
     parse_sse_line(line: string): string;
     provider_base_url(provider: string): string;
+
+    // Tool Registry
+    WasmToolRegistry: {
+        new(): WasmToolRegistryInstance;
+    };
 
     // Memory
     memory_create_table_sql(): string;
@@ -132,7 +137,14 @@ interface WasmAgentInstance {
         tool_name: string,
         result: string
     ): string;
-estimate_context_tokens(messages_json: string): number;
+    estimate_context_tokens(messages_json: string): number;
+    check_tool_security(tool_name: string, args_json: string, target_url: string): string;
+    secure_tool_response(tool_name: string, output: string): string;
+    free(): void;
+}
+
+interface WasmToolRegistryInstance {
+    to_llm_json(): string;
     free(): void;
 }
 
@@ -213,4 +225,4 @@ export function isWasmReady(): boolean {
 }
 
 // Re-export types for TypeScript consumers
-export type { EzClawWasm, WasmConfigInstance, WasmAgentInstance, WasmWorkspaceInstance, WasmChannelRouterInstance, WasmSandboxManagerInstance, WasmLeakScannerInstance };
+export type { EzClawWasm, WasmConfigInstance, WasmAgentInstance, WasmWorkspaceInstance, WasmChannelRouterInstance, WasmSandboxManagerInstance, WasmLeakScannerInstance, WasmToolRegistryInstance };

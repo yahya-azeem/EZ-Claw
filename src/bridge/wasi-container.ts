@@ -1,4 +1,4 @@
-import type { WasmModule } from '@bjorn3/browser_wasi_shim';
+// WASI Container — browser-based WebAssembly container with fallback shell
 
 export interface WASIContainerConfig {
     wasmPath: string;
@@ -20,6 +20,9 @@ export interface ContainerInfo {
     mountPoints: string[];
 }
 
+// Shared environment variables (used in environ_get and environ_sizes_get)
+const WASI_ENV_VARS = ['HOME=/', 'USER=ezclaw', 'PATH=/usr/local/bin:/usr/bin:/bin', 'PWD=/workspace', 'TERM=xterm-256color'];
+
 export class WASIContainer {
     private instance: WebAssembly.Instance | null = null;
     private module: WebAssembly.Module | null = null;
@@ -30,6 +33,8 @@ export class WASIContainer {
     private osInfo: string = 'alpine';
     private stdout: string = '';
     private stderr: string = '';
+    private textEncoder = new TextEncoder();
+    private textDecoder = new TextDecoder();
 
     static async load(wasmPath: string): Promise<WASIContainer> {
         const container = new WASIContainer();
@@ -49,7 +54,11 @@ export class WASIContainer {
     }
 
     async start(config?: { mounts?: Record<string, FileSystemDirectoryHandle> }): Promise<void> {
-        if (!this.module) throw new Error('WASM module not loaded');
+        if (!this.module) {
+            // No WASM module loaded — run in fallback shell mode
+            this.ready = true;
+            return;
+        }
 
         this.memory = new WebAssembly.Memory({ initial: 256, maximum: 512 });
 
@@ -59,8 +68,8 @@ export class WASIContainer {
             }
         }
 
-        const textEncoder = new TextEncoder();
-        const textDecoder = new TextDecoder();
+        const textEncoder = this.textEncoder;
+        const textDecoder = this.textDecoder;
 
         const imports = {
             wasi_snapshot_preview1: {
@@ -81,6 +90,7 @@ export class WASIContainer {
                         } else if (fd === 2) {
                             this.stderr += decoded;
                         }
+                        nwritten += len;
                     }
                     view.setUint32(nwritten_ptr, nwritten, true);
                     return 0;
@@ -106,10 +116,9 @@ export class WASIContainer {
                 environ_get: (environ_ptr: number, environ_buf_ptr: number): number => {
                     if (!this.memory) return 1;
                     const view = new DataView(this.memory.buffer);
-                    const envVars = ['HOME=/', 'USER=ezclaw', 'PATH=/usr/local/bin:/usr/bin:/bin', 'PWD=/workspace', 'TERM=xterm-256color'];
                     let offset = environ_buf_ptr;
-                    for (let i = 0; i < envVars.length; i++) {
-                        const bytes = textEncoder.encode(envVars[i] + '\0');
+                    for (let i = 0; i < WASI_ENV_VARS.length; i++) {
+                        const bytes = textEncoder.encode(WASI_ENV_VARS[i] + '\0');
                         view.setUint32(environ_ptr + i * 4, offset, true);
                         new Uint8Array(this.memory.buffer, offset, bytes.length).set(bytes);
                         offset += bytes.length;
@@ -119,9 +128,8 @@ export class WASIContainer {
                 environ_sizes_get: (environc_ptr: number, environ_buf_size_ptr: number): number => {
                     if (!this.memory) return 1;
                     const view = new DataView(this.memory.buffer);
-                    const envVars = ['HOME=/', 'USER=ezclaw', 'PATH=/usr/local/bin:/usr/bin:/bin', 'PWD=/workspace', 'TERM=xterm-256color'];
-                    view.setUint32(environc_ptr, envVars.length, true);
-                    const totalSize = envVars.reduce((sum, e) => sum + e.length + 1, 0);
+                    view.setUint32(environc_ptr, WASI_ENV_VARS.length, true);
+                    const totalSize = WASI_ENV_VARS.reduce((sum, e) => sum + e.length + 1, 0);
                     view.setUint32(environ_buf_size_ptr, totalSize, true);
                     return 0;
                 },
@@ -187,8 +195,8 @@ export class WASIContainer {
             const argvPtr = (exports as any).malloc(argvBuffer.length);
             const envPtr = (exports as any).malloc(envVars.length);
 
-            new Uint8Array(memory.buffer, argvPtr, argvBuffer.length).set(textEncoder.encode(argvBuffer));
-            new Uint8Array(memory.buffer, envPtr, envVars.length).set(textEncoder.encode(envVars));
+            new Uint8Array(memory.buffer, argvPtr, argvBuffer.length).set(this.textEncoder.encode(argvBuffer));
+            new Uint8Array(memory.buffer, envPtr, envVars.length).set(this.textEncoder.encode(envVars));
 
             const argvArrayPtr = (exports as any).malloc(argv.length * 4);
             const view = new DataView(memory.buffer);
@@ -331,11 +339,36 @@ export class WASIContainer {
 }
 
 export async function detectArchitecture(): Promise<'amd64' | 'arm64'> {
-    const ua = navigator.userAgent;
-    if (ua.includes('Arm64') || ua.includes('aarch64') || ua.includes('Mac')) {
-        const isAppleSilicon = ua.includes('Mac') && ua.includes('Safari');
-        if (isAppleSilicon || ua.includes('Version/16')) return 'arm64';
+    // Use modern userAgentData API when available
+    if ('userAgentData' in navigator) {
+        try {
+            const uaData = await (navigator as any).userAgentData.getHighEntropyValues(['architecture']);
+            if (uaData.architecture === 'arm') return 'arm64';
+            return 'amd64';
+        } catch { /* fallback below */ }
     }
+
+    // Fallback heuristics
+    const ua = navigator.userAgent;
+    if (ua.includes('aarch64') || ua.includes('arm64') || ua.includes('Arm64')) return 'arm64';
+
+    // Apple Silicon Macs — all post-2020 Macs with macOS 11+ are ARM
+    if (ua.includes('Mac') && typeof (navigator as any).platform === 'string') {
+        // macOS 11.0+ on ARM Safari reports 'MacIntel' for compat, but we can
+        // check for WebGL renderer containing 'Apple' GPU (M-series chips)
+        try {
+            const canvas = document.createElement('canvas');
+            const gl = canvas.getContext('webgl');
+            if (gl) {
+                const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                if (debugInfo) {
+                    const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                    if (typeof renderer === 'string' && renderer.includes('Apple')) return 'arm64';
+                }
+            }
+        } catch { /* silent */ }
+    }
+
     return 'amd64';
 }
 

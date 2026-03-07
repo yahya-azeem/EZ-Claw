@@ -1,5 +1,11 @@
 <script lang="ts">
   import { exportAllData, importData } from "../bridge/storage-bridge";
+  import {
+    PROVIDERS,
+    getDefaultApiUrl,
+    NO_KEY_PROVIDERS,
+    type ProviderDef,
+  } from "../bridge/providers";
 
   interface Props {
     provider: string;
@@ -28,68 +34,14 @@
   let showApiKey = $state(false);
   let exportStatus = $state("");
 
-  const providers = [
-    {
-      id: "deepseek",
-      name: "DeepSeek",
-      defaultModel: "deepseek-chat",
-      free: true,
-    },
-    {
-      id: "openrouter",
-      name: "OpenRouter",
-      defaultModel: "deepseek/deepseek-chat",
-      free: true,
-    },
-    { id: "openai", name: "OpenAI", defaultModel: "gpt-4o-mini", free: false },
-    {
-      id: "anthropic",
-      name: "Anthropic",
-      defaultModel: "claude-3-5-sonnet-20241022",
-      free: false,
-    },
-    {
-      id: "ollama",
-      name: "Ollama (Local)",
-      defaultModel: "llama3",
-      free: true,
-    },
-    {
-      id: "custom",
-      name: "Custom OpenAI-compatible",
-      defaultModel: "",
-      free: false,
-    },
-    {
-      id: "puter",
-      name: "Puter (User-Pays)",
-      defaultModel: "gpt-4o-mini",
-      free: false,
-    },
-    {
-      id: "zerogravity",
-      name: "ZeroGravity (Antigravity)",
-      defaultModel: "sonnet-4.6",
-      free: false,
-    },
-  ];
+  const providers = PROVIDERS;
 
-function handleProviderChange() {
+  function handleProviderChange() {
     const selected = providers.find((p) => p.id === localProvider);
     if (selected) {
       localModel = selected.defaultModel;
       localApiKey = "";
-      if (localProvider === "ollama") {
-        localApiUrl = "http://localhost:11434/v1";
-      } else if (localProvider === "zerogravity") {
-        localApiUrl = "http://localhost:8741/v1";
-      } else if (localProvider === "puter") {
-        localApiUrl = "https://api.puter.com/v1";
-      } else if (localProvider === "custom") {
-        localApiUrl = "";
-      } else {
-        localApiUrl = "";
-      }
+      localApiUrl = getDefaultApiUrl(localProvider);
     }
   }
 
@@ -198,63 +150,33 @@ function handleProviderChange() {
           list="model-suggestions"
         />
         <datalist id="model-suggestions">
-          {#if localProvider === "openrouter"}
-            <option value="deepseek/deepseek-chat">DeepSeek V3 (Free)</option>
-            <option value="deepseek/deepseek-r1">DeepSeek R1 (Free)</option>
-            <option value="google/gemini-2.0-flash-exp:free"
-              >Gemini 2.0 Flash (Free)</option
-            >
-            <option value="meta-llama/llama-3.3-70b-instruct:free"
-              >Llama 3.3 70B (Free)</option
-            >
-            <option value="qwen/qwen-2.5-72b-instruct:free"
-              >Qwen 2.5 72B (Free)</option
-            >
-            <option value="anthropic/claude-3.5-sonnet"
-              >Claude 3.5 Sonnet</option
-            >
-            <option value="openai/gpt-4o">GPT-4o</option>
-          {:else if localProvider === "deepseek"}
-            <option value="deepseek-chat">DeepSeek V3</option>
-            <option value="deepseek-reasoner">DeepSeek R1</option>
-          {:else if localProvider === "openai"}
-            <option value="gpt-4o">GPT-4o</option>
-            <option value="gpt-4o-mini">GPT-4o Mini</option>
-            <option value="gpt-4-turbo">GPT-4 Turbo</option>
-          {:else if localProvider === "anthropic"}
-            <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option
-            >
-            <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
-          {:else if localProvider === "ollama"}
-            <option value="llama3">Llama 3</option>
-            <option value="mistral">Mistral</option>
-            <option value="codellama">Code Llama</option>
-            <option value="deepseek-coder-v2">DeepSeek Coder V2</option>
-          {:else if localProvider === "zerogravity"}
-            <option value="sonnet-4.6">Claude Sonnet 4.6</option>
-            <option value="opus-4.6">Claude Opus 4.6</option>
-            <option value="gemini-3-flash">Gemini 3 Flash</option>
-            <option value="gemini-3.1-pro">Gemini 3.1 Pro</option>
-            <option value="gemini-3-pro-image">Gemini 3 Pro (Images)</option>
-          {:else if localProvider === "puter"}
-            <option value="gpt-4o-mini">GPT-4o Mini</option>
-            <option value="gpt-4o">GPT-4o</option>
-            <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>
-          {/if}
+          {#each providers as p}
+            {#if p.id === localProvider}
+              {#each p.models as m, idx}
+                <option value={m}>{p.modelLabels?.[idx] || m}</option>
+              {/each}
+            {/if}
+          {/each}
         </datalist>
         <span class="field-hint"
           >Type or select a model. Provider: {localProvider}</span
         >
       </label>
 
-<label class="field">
-        <span class="field-label">API Key {localProvider === "zerogravity" || localProvider === "ollama" ? "(optional)" : ""}</span>
+      <label class="field">
+        <span class="field-label"
+          >API Key {NO_KEY_PROVIDERS.includes(localProvider)
+            ? "(optional)"
+            : ""}</span
+        >
         <div class="api-key-wrapper">
           <input
             class="input"
             type={showApiKey ? "text" : "password"}
             bind:value={localApiKey}
-            placeholder={localProvider === "zerogravity" || localProvider === "ollama" ? "Not required" : "Enter your API key"}
+            placeholder={NO_KEY_PROVIDERS.includes(localProvider)
+              ? "Not required"
+              : "Enter your API key"}
           />
           <button
             class="btn btn-ghost btn-sm"
@@ -263,22 +185,28 @@ function handleProviderChange() {
             {showApiKey ? "🙈" : "👁️"}
           </button>
         </div>
-        {#if localProvider === "zerogravity" || localProvider === "ollama"}
+        {#if NO_KEY_PROVIDERS.includes(localProvider)}
           <span class="field-hint">Authentication handled locally</span>
         {/if}
       </label>
 
-      {#if localProvider === "custom" || localProvider === "ollama" || localProvider === "zerogravity" || localProvider === "puter" || localProvider === "deepseek" || localProvider === "openrouter" || localProvider === "openai" || localProvider === "anthropic"}
+      {#if localProvider === "custom" || getDefaultApiUrl(localProvider) || localProvider === "deepseek" || localProvider === "openrouter" || localProvider === "openai" || localProvider === "anthropic"}
         <label class="field">
-          <span class="field-label">API URL {localProvider !== "custom" ? "(optional)" : ""}</span>
+          <span class="field-label"
+            >API URL {localProvider !== "custom" ? "(optional)" : ""}</span
+          >
           <input
             class="input"
             type="text"
             bind:value={localApiUrl}
-            placeholder={localProvider === "ollama" ? "http://localhost:11434/v1" : localProvider === "zerogravity" ? "http://localhost:8741/v1" : localProvider === "puter" ? "https://api.puter.com/v1" : "Leave empty to use default"}
+            placeholder={getDefaultApiUrl(localProvider) ||
+              "Leave empty to use default"}
           />
           {#if !localApiUrl && localProvider !== "custom"}
-            <span class="field-hint">Using default: {localProvider === "deepseek" ? "https://api.deepseek.com/v1" : localProvider === "openrouter" ? "https://openrouter.ai/api/v1" : localProvider === "openai" ? "https://api.openai.com/v1" : localProvider === "anthropic" ? "https://api.anthropic.com/v1" : ""}</span>
+            {@const defaultUrl = getDefaultApiUrl(localProvider)}
+            {#if defaultUrl}
+              <span class="field-hint">Using default: {defaultUrl}</span>
+            {/if}
           {/if}
         </label>
       {/if}

@@ -12,7 +12,8 @@
  */
 
 import { initWasm, getWasm, isWasmReady, type EzClawWasm } from './wasm-loader';
-import { streamChat, chatCompletion, type ProviderConfig } from './provider-bridge';
+import { type ProviderConfig } from './provider-bridge';
+import { NO_KEY_PROVIDERS } from './providers';
 import { getConfig, saveConfig } from './storage-bridge';
 import { recallMemories, storeMemory, initMemory, loadMemoryFromData, exportMemoryData } from './memory-bridge';
 import {
@@ -104,6 +105,7 @@ export interface EZClawAPI {
 // Internal state
 let _wasm: EzClawWasm | null = null;
 let _sandbox: SandboxManager | null = null;
+let _workspace: any = null; // Shared WasmWorkspace singleton
 let _eventListeners: Map<string, Set<Function>> = new Map();
 let _config: EZClawConfig = {
     provider: 'deepseek',
@@ -112,6 +114,14 @@ let _config: EZClawConfig = {
     temperature: 0.7,
     apiUrl: '',
 };
+
+function getWorkspace(): any {
+    if (!_wasm) throw new Error('EZClaw not initialized');
+    if (!_workspace) {
+        _workspace = new (_wasm as any).WasmWorkspace();
+    }
+    return _workspace;
+}
 
 // Load config from storage
 async function loadConfig(): Promise<void> {
@@ -151,8 +161,9 @@ const EZClaw: EZClawAPI = {
             await initMemory();
         } catch { /* ignore */ }
 
-        // Create sandbox manager
+        // Create sandbox manager and workspace
         _sandbox = new SandboxManager({ tier: 'wasi', enabled: true });
+        _workspace = new (_wasm as any).WasmWorkspace();
 
         console.log('[EZClaw] Initialized');
     },
@@ -178,8 +189,7 @@ const EZClaw: EZClawAPI = {
     async chat(message: string, options?: ChatOptions): Promise<string> {
         if (!_wasm) throw new Error('EZClaw not initialized. Call init() first.');
         
-        const noKeyProviders = ['zerogravity', 'ollama'];
-        if (!noKeyProviders.includes(_config.provider) && !_config.apiKey) {
+        if (!NO_KEY_PROVIDERS.includes(_config.provider) && !_config.apiKey) {
             throw new Error('No API key configured. Call setConfig() first.');
         }
 
@@ -220,52 +230,83 @@ const EZClaw: EZClawAPI = {
             new Date().toLocaleString(),
         );
 
-        const providerConfig: ProviderConfig = {
-            provider: _config.provider,
-            apiKey: _config.apiKey,
-            model: opt.model,
-            temperature: opt.temperature,
-            apiUrl: _config.apiUrl || undefined,
-        };
+        // Agentic loop: non-streaming with tool call handling
+        let loopMessages = JSON.parse(builtMessagesJson);
+        const maxIterations = 10;
+        let finalResponse = '';
+        const workspace = getWorkspace();
 
-        // For now, use non-streaming (full response)
-        const response = await chatCompletion(
-            builtMessagesJson,
-            providerConfig,
-            false, // non-streaming
-            async (toolCallJson: string) => {
-                const toolCalls = JSON.parse(toolCallJson);
-                const results: ToolCallResult[] = [];
+        // Build headers
+        const { buildProviderHeaders } = await import('./providers');
+        let baseUrl = _config.apiUrl || _wasm.provider_base_url(_config.provider);
+        const endpoint = `${baseUrl}/chat/completions`;
+        const headers = buildProviderHeaders(_config.provider, _config.apiKey);
 
-                for (const tc of toolCalls) {
+        for (let i = 0; i < maxIterations; i++) {
+            const requestBody = _wasm.build_provider_request(
+                JSON.stringify(loopMessages),
+                opt.model,
+                opt.temperature,
+                false,
+            );
+
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers,
+                body: requestBody,
+            });
+
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`API error ${response.status}: ${errText}`);
+            }
+
+            const data = await response.json();
+            const choice = data.choices?.[0];
+            if (!choice) throw new Error('No response from model');
+
+            const assistantMsg = choice.message;
+
+            // Handle tool calls
+            if (assistantMsg.tool_calls?.length > 0) {
+                loopMessages.push(assistantMsg);
+
+                for (const tc of assistantMsg.tool_calls) {
                     const request: ToolCallRequest = {
-                        id: tc.id,
-                        name: tc.function.name,
-                        arguments: tc.function.arguments,
+                        id: tc.id || crypto.randomUUID(),
+                        name: tc.function?.name || tc.name || 'unknown',
+                        arguments: tc.function?.arguments || tc.arguments || '{}',
                     };
 
                     let result: ToolCallResult;
                     if (options?.onToolCall) {
                         result = await options.onToolCall(request);
                     } else {
-                        result = await executeToolCall(agent, null as any, request);
+                        result = await executeToolCall(agent, workspace, request);
                     }
 
-                    results.push(result);
+                    loopMessages.push({
+                        role: 'tool',
+                        tool_call_id: request.id,
+                        content: result.output || result.error || '',
+                    });
                 }
-
-                return JSON.stringify(results);
+                continue;
             }
-        );
+
+            // No tool calls — final text response
+            finalResponse = assistantMsg.content || '';
+            break;
+        }
 
         agent.free();
 
         // Handle first-run bootstrap completion
-        if (isFirstRun() && response.includes('bootstrapped')) {
+        if (isFirstRun() && finalResponse.includes('bootstrapped')) {
             markBootstrapped();
         }
 
-        return response;
+        return finalResponse;
     },
 
     /**

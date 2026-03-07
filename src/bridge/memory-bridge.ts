@@ -51,8 +51,7 @@ async function initSqlJs(config?: any): Promise<any> {
  * Load memory database from a saved Uint8Array (for session resume).
  */
 export async function loadMemoryFromData(data: Uint8Array): Promise<void> {
-    const sqlInit = await getSqlJs();
-    const SQL = await sqlInit({
+    const SQL = await initSqlJs({
         locateFile: (file: string) => `https://sql.js.org/dist/${file}`,
     });
 

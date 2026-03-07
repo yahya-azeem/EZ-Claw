@@ -1,10 +1,19 @@
 <script lang="ts">
-  import { tick } from 'svelte';
-  import MessageBubble from './MessageBubble.svelte';
-  import { getWasm } from '../bridge/wasm-loader';
-  import { streamChat, chatCompletion, type ProviderConfig } from '../bridge/provider-bridge';
-  import { saveSession, getSession, type SessionData } from '../bridge/storage-bridge';
-  import { recallMemories, storeMemory } from '../bridge/memory-bridge';
+  import { tick } from "svelte";
+  import MessageBubble from "./MessageBubble.svelte";
+  import { getWasm } from "../bridge/wasm-loader";
+  import {
+    streamChat,
+    chatCompletion,
+    type ProviderConfig,
+  } from "../bridge/provider-bridge";
+  import {
+    saveSession,
+    getSession,
+    type SessionData,
+  } from "../bridge/storage-bridge";
+  import { recallMemories, storeMemory } from "../bridge/memory-bridge";
+  import { buildProviderHeaders, NO_KEY_PROVIDERS } from "../bridge/providers";
   import {
     buildIdentityPrompt,
     buildBootstrapPrompt,
@@ -15,15 +24,29 @@
     markBootstrapped,
     loadUser,
     saveUser,
-  } from '../bridge/identity-bridge';
-  import { executeToolCall, type ToolCallRequest, type ToolCallResult } from '../bridge/tool-runtime';
-  import { SandboxManager } from '../bridge/sandbox-manager';
+  } from "../bridge/identity-bridge";
+  import {
+    executeToolCall,
+    type ToolCallRequest,
+    type ToolCallResult,
+  } from "../bridge/tool-runtime";
+  import { SandboxManager } from "../bridge/sandbox-manager";
 
   // Singleton sandbox manager for shell_exec
   let sandboxManager: SandboxManager | null = null;
   function getSandbox(): SandboxManager {
-    if (!sandboxManager) sandboxManager = new SandboxManager({ tier: 'wasi', enabled: true });
+    if (!sandboxManager)
+      sandboxManager = new SandboxManager({ tier: "wasi", enabled: true });
     return sandboxManager;
+  }
+
+  // Shared workspace singleton so file state persists between tool calls
+  let workspaceInstance: any = null;
+  function getSharedWorkspace(): any {
+    if (!workspaceInstance) {
+      workspaceInstance = new (getWasm() as any).WasmWorkspace();
+    }
+    return workspaceInstance;
   }
 
   interface Props {
@@ -36,22 +59,36 @@
     onSessionUpdate: (session: SessionData) => void;
   }
 
-  let { sessionId, provider, model, apiKey, temperature, apiUrl, onSessionUpdate }: Props = $props();
+  let {
+    sessionId,
+    provider,
+    model,
+    apiKey,
+    temperature,
+    apiUrl,
+    onSessionUpdate,
+  }: Props = $props();
 
-  let messages: Array<{ role: string; content: string; tool_calls?: any[]; tool_call_id?: string; name?: string }> = $state([]);
-  let inputText = $state('');
+  let messages: Array<{
+    role: string;
+    content: string;
+    tool_calls?: any[];
+    tool_call_id?: string;
+    name?: string;
+  }> = $state([]);
+  let inputText = $state("");
   let isStreaming = $state(false);
-  let streamingContent = $state('');
-  let toolActivity = $state('');
+  let streamingContent = $state("");
+  let toolActivity = $state("");
   let chatContainer: HTMLDivElement | undefined = $state();
   let inputEl: HTMLTextAreaElement | undefined = $state();
 
   // Load session messages when session changes
   $effect(() => {
     if (sessionId) {
-      streamingContent = '';
+      streamingContent = "";
       isStreaming = false;
-      toolActivity = '';
+      toolActivity = "";
       loadSessionMessages(sessionId);
     } else {
       messages = [];
@@ -83,22 +120,25 @@
     const text = inputText.trim();
     if (!text || isStreaming) return;
 
-if (!apiKey) {
-      const noKeyProviders = ['zerogravity', 'ollama'];
-      if (!noKeyProviders.includes(provider)) {
-        messages = [...messages, {
-          role: 'assistant',
-          content: '⚠️ **No API key configured.** Please open Settings and enter your API key to start chatting.'
-        }];
+    if (!apiKey) {
+      if (!NO_KEY_PROVIDERS.includes(provider)) {
+        messages = [
+          ...messages,
+          {
+            role: "assistant",
+            content:
+              "⚠️ **No API key configured.** Please open Settings and enter your API key to start chatting.",
+          },
+        ];
         return;
       }
     }
 
-    messages = [...messages, { role: 'user', content: text }];
-    inputText = '';
+    messages = [...messages, { role: "user", content: text }];
+    inputText = "";
     isStreaming = true;
-    streamingContent = '';
-    toolActivity = '';
+    streamingContent = "";
+    toolActivity = "";
 
     await scrollToBottom();
 
@@ -111,23 +151,29 @@ if (!apiKey) {
       // First-run bootstrap: inject OpenClaw-style "Who am I?" prompt
       const firstRun = isFirstRun();
       if (firstRun) {
-        identityPrompt += '\n\n' + buildBootstrapPrompt();
+        identityPrompt += "\n\n" + buildBootstrapPrompt();
       }
 
       // Recall relevant memories
       let memoriesArr: string[] = [];
       try {
         const recalled = recallMemories(text, 5);
-        memoriesArr = recalled.map(m => `[${m.category}] ${m.key}: ${m.content}`);
-      } catch { /* Memory not initialized yet */ }
+        memoriesArr = recalled.map(
+          (m) => `[${m.category}] ${m.key}: ${m.content}`,
+        );
+      } catch {
+        /* Memory not initialized yet */
+      }
 
-// Build messages with WASM agent (includes system prompt + identity + memories)
-      const cleanMessages = messages.filter(m => m && m.role && m.content);
-      const agent = new (wasm as any).WasmAgent(JSON.stringify({
-        default_provider: provider,
-        default_model: model,
-        default_temperature: temperature,
-      }));
+      // Build messages with WASM agent (includes system prompt + identity + memories)
+      const cleanMessages = messages.filter((m) => m && m.role && m.content);
+      const agent = new (wasm as any).WasmAgent(
+        JSON.stringify({
+          default_provider: provider,
+          default_model: model,
+          default_temperature: temperature,
+        }),
+      );
 
       const builtMessagesJson = agent.build_messages(
         JSON.stringify(cleanMessages),
@@ -141,7 +187,7 @@ if (!apiKey) {
       // Get tool definitions
       const toolRegistry = new (wasm as any).WasmToolRegistry();
       const toolsJson = toolRegistry.to_llm_json();
-      console.log('[EZ-Claw] Tools JSON:', toolsJson.slice(0, 500));
+      console.log("[EZ-Claw] Tools JSON:", toolsJson.slice(0, 500));
       toolRegistry.free();
 
       const providerConfig: ProviderConfig = {
@@ -161,7 +207,7 @@ if (!apiKey) {
       let maxIterations = 10;
 
       for (let i = 0; i < maxIterations; i++) {
-        toolActivity = i > 0 ? 'Thinking...' : '';
+        toolActivity = i > 0 ? "Thinking..." : "";
 
         // Non-streaming request WITH tools
         const requestBody = wasm.build_provider_request_with_tools(
@@ -172,25 +218,12 @@ if (!apiKey) {
           toolsJson,
         );
 
-let baseUrl = apiUrl || wasm.provider_base_url(provider);
+        let baseUrl = apiUrl || wasm.provider_base_url(provider);
         const endpoint = `${baseUrl}/chat/completions`;
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-
-        if (provider === 'anthropic') {
-          headers['x-api-key'] = apiKey;
-          headers['anthropic-version'] = '2023-06-01';
-        } else if (provider === 'zerogravity' || provider === 'ollama') {
-          // No auth header needed
-        } else if (apiKey) {
-          headers['Authorization'] = `Bearer ${apiKey}`;
-        }
-        if (provider === 'openrouter') {
-          headers['HTTP-Referer'] = window.location.origin;
-          headers['X-Title'] = 'EZ-Claw';
-        }
+        const headers = buildProviderHeaders(provider, apiKey);
 
         const response = await fetch(endpoint, {
-          method: 'POST',
+          method: "POST",
           headers,
           body: requestBody,
         });
@@ -203,23 +236,26 @@ let baseUrl = apiUrl || wasm.provider_base_url(provider);
         const data = await response.json();
         const choice = data.choices?.[0];
 
-        if (!choice) throw new Error('No response from model');
+        if (!choice) throw new Error("No response from model");
 
         const assistantMsg = choice.message;
-        
+
         // Debug: log what we got
-        console.log('[EZ-Claw] Response:', JSON.stringify(assistantMsg));
+        console.log("[EZ-Claw] Response:", JSON.stringify(assistantMsg));
 
         // Check for tool calls
         if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
-          console.log('[EZ-Claw] Tool calls detected:', assistantMsg.tool_calls);
+          console.log(
+            "[EZ-Claw] Tool calls detected:",
+            assistantMsg.tool_calls,
+          );
           // Add the assistant message with tool_calls to the loop
           loopMessages.push(assistantMsg);
 
           // Execute each tool call
           for (const tc of assistantMsg.tool_calls) {
-            const toolName = tc.function?.name || tc.name || 'unknown';
-            const toolArgs = tc.function?.arguments || tc.arguments || '{}';
+            const toolName = tc.function?.name || tc.name || "unknown";
+            const toolArgs = tc.function?.arguments || tc.arguments || "{}";
             const toolId = tc.id || crypto.randomUUID();
 
             toolActivity = `🔧 Running: ${toolName}...`;
@@ -229,16 +265,16 @@ let baseUrl = apiUrl || wasm.provider_base_url(provider);
             let result: string;
             try {
               const args = JSON.parse(toolArgs);
-              console.log('[EZ-Claw] Executing tool:', toolName, args);
+              console.log("[EZ-Claw] Executing tool:", toolName, args);
               result = await dispatchToolDirect(toolName, args);
-              console.log('[EZ-Claw] Tool result:', result.slice(0, 200));
+              console.log("[EZ-Claw] Tool result:", result.slice(0, 200));
             } catch (e: any) {
               result = `Error: ${e.message}`;
             }
 
             // Add tool result to loop messages (OpenAI format)
             loopMessages.push({
-              role: 'tool',
+              role: "tool",
               tool_call_id: toolId,
               content: result,
             });
@@ -249,18 +285,21 @@ let baseUrl = apiUrl || wasm.provider_base_url(provider);
         }
 
         // No tool calls → we have the final text response
-        const finalText = assistantMsg.content || '';
-        messages = [...messages, { role: 'assistant', content: finalText }];
-        toolActivity = '';
+        const finalText = assistantMsg.content || "";
+        messages = [...messages, { role: "assistant", content: finalText }];
+        toolActivity = "";
         isStreaming = false;
-        streamingContent = '';
+        streamingContent = "";
 
         // Auto-save session
         if (sessionId) {
           const session: SessionData = {
             id: sessionId,
             title: generateTitle(messages),
-            messages: messages.map(m => ({ role: m.role, content: m.content })),
+            messages: messages.map((m) => ({
+              role: m.role,
+              content: m.content,
+            })),
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
             model,
@@ -275,31 +314,38 @@ let baseUrl = apiUrl || wasm.provider_base_url(provider);
           storeMemory(
             `chat-${Date.now()}`,
             `User: ${text}\nAssistant: ${finalText.slice(0, 200)}`,
-            'conversation',
-            sessionId || ''
+            "conversation",
+            sessionId || "",
           );
-        } catch { /* Memory not ready */ }
+        } catch {
+          /* Memory not ready */
+        }
 
         await scrollToBottom();
         return; // Done
       }
 
       // If we exhausted max iterations, show what we have
-      toolActivity = '';
+      toolActivity = "";
       isStreaming = false;
-      messages = [...messages, {
-        role: 'assistant',
-        content: '⚠️ Reached maximum tool execution depth. Please try again.'
-      }];
-
+      messages = [
+        ...messages,
+        {
+          role: "assistant",
+          content: "⚠️ Reached maximum tool execution depth. Please try again.",
+        },
+      ];
     } catch (err) {
-      messages = [...messages, {
-        role: 'assistant',
-        content: `❌ **Error:** ${err instanceof Error ? err.message : String(err)}`
-      }];
+      messages = [
+        ...messages,
+        {
+          role: "assistant",
+          content: `❌ **Error:** ${err instanceof Error ? err.message : String(err)}`,
+        },
+      ];
       isStreaming = false;
-      streamingContent = '';
-      toolActivity = '';
+      streamingContent = "";
+      toolActivity = "";
     }
   }
 
@@ -307,34 +353,48 @@ let baseUrl = apiUrl || wasm.provider_base_url(provider);
    * Direct tool dispatch without WASM security pipeline (simplified for now).
    * TODO: wire through full executeToolCall with WASM agent security checks.
    */
-  async function dispatchToolDirect(name: string, args: Record<string, any>): Promise<string> {
+  async function dispatchToolDirect(
+    name: string,
+    args: Record<string, any>,
+  ): Promise<string> {
     switch (name) {
-      case 'web_search': {
-        const query = args.query || '';
+      case "web_search": {
+        const query = args.query || "";
         const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
         const res = await fetch(url);
         const data = await res.json();
         const results: string[] = [];
-        if (data.Abstract) results.push(`**Summary**: ${data.Abstract}\nSource: ${data.AbstractURL}`);
+        if (data.Abstract)
+          results.push(
+            `**Summary**: ${data.Abstract}\nSource: ${data.AbstractURL}`,
+          );
         if (data.RelatedTopics) {
           for (const topic of data.RelatedTopics.slice(0, 5)) {
-            if (topic.Text) results.push(`- ${topic.Text}${topic.FirstURL ? ` (${topic.FirstURL})` : ''}`);
+            if (topic.Text)
+              results.push(
+                `- ${topic.Text}${topic.FirstURL ? ` (${topic.FirstURL})` : ""}`,
+              );
           }
         }
-        return results.length > 0 ? results.join('\n\n') : `No results for: "${query}"`;
+        return results.length > 0
+          ? results.join("\n\n")
+          : `No results for: "${query}"`;
       }
 
-      case 'web_fetch': {
+      case "web_fetch": {
         const res = await fetch(args.url);
         const text = await res.text();
-        const cleaned = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        const cleaned = text
+          .replace(/<[^>]*>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
         return cleaned.slice(0, 10000);
       }
 
-      case 'memory_store': {
+      case "memory_store": {
         const key = args.key || `mem-${Date.now()}`;
-        const content = args.content || args.value || '';
-        const category = args.category || 'core';
+        const content = args.content || args.value || "";
+        const category = args.category || "core";
         try {
           storeMemory(key, content, category);
           return `Memory stored: key="${key}", category="${category}"`;
@@ -343,23 +403,24 @@ let baseUrl = apiUrl || wasm.provider_base_url(provider);
         }
       }
 
-      case 'memory_recall': {
+      case "memory_recall": {
         try {
-          const results = recallMemories(args.query || '', args.limit || 5);
-          if (results.length === 0) return `No memories found for: "${args.query}"`;
-          return results.map(m =>
-            `[${m.category}] ${m.key}: ${m.content}`
-          ).join('\n');
+          const results = recallMemories(args.query || "", args.limit || 5);
+          if (results.length === 0)
+            return `No memories found for: "${args.query}"`;
+          return results
+            .map((m) => `[${m.category}] ${m.key}: ${m.content}`)
+            .join("\n");
         } catch (e: any) {
           return `Memory recall failed: ${e.message}`;
         }
       }
 
-      case 'update_identity': {
+      case "update_identity": {
         const identity = loadIdentity();
         if (args.name) {
           identity.name = args.name;
-          identity.facts['name'] = args.name;
+          identity.facts["name"] = args.name;
         }
         if (args.personality) identity.personality = args.personality;
         if (args.instructions) identity.instructions = args.instructions;
@@ -377,59 +438,70 @@ let baseUrl = apiUrl || wasm.provider_base_url(provider);
         }
         // Also persist to memory
         try {
-          if (args.name) storeMemory('identity_name', `My name is ${args.name}`, 'identity');
-          if (args.personality) storeMemory('identity_personality', args.personality, 'identity');
-          if (args.creature) storeMemory('identity_creature', args.creature, 'identity');
-          if (args.fact_key) storeMemory(`identity_${args.fact_key}`, args.fact_value, 'identity');
-        } catch { /* silent */ }
+          if (args.name)
+            storeMemory("identity_name", `My name is ${args.name}`, "identity");
+          if (args.personality)
+            storeMemory("identity_personality", args.personality, "identity");
+          if (args.creature)
+            storeMemory("identity_creature", args.creature, "identity");
+          if (args.fact_key)
+            storeMemory(
+              `identity_${args.fact_key}`,
+              args.fact_value,
+              "identity",
+            );
+        } catch {
+          /* silent */
+        }
         return `Identity updated successfully: ${JSON.stringify(identity, null, 2)}`;
       }
 
-      case 'read_file': {
+      case "read_file": {
         try {
-          const ws = new (getWasm() as any).WasmWorkspace();
-          const content = ws.read_file(args.path || '');
-          ws.free();
+          const ws = getSharedWorkspace();
+          const content = ws.read_file(args.path || "");
           return content;
         } catch (e: any) {
           return `read_file error: ${e.message}`;
         }
       }
 
-      case 'write_file': {
+      case "write_file": {
         try {
-          const ws = new (getWasm() as any).WasmWorkspace();
-          ws.write_file(args.path || '', args.content || '');
-          ws.free();
-          return `File written: ${args.path} (${(args.content || '').length} bytes)`;
+          const ws = getSharedWorkspace();
+          ws.write_file(args.path || "", args.content || "");
+          return `File written: ${args.path} (${(args.content || "").length} bytes)`;
         } catch (e: any) {
           return `write_file error: ${e.message}`;
         }
       }
 
-      case 'list_dir': {
+      case "list_dir": {
         try {
-          const ws = new (getWasm() as any).WasmWorkspace();
-          const json = ws.list_dir(args.path || '/');
-          ws.free();
+          const ws = getSharedWorkspace();
+          const json = ws.list_dir(args.path || "/");
           const entries = JSON.parse(json);
-          if (entries.length === 0) return '(empty directory)';
-          return entries.map((e: any) =>
-            `${e.is_dir ? '📁' : '📄'} ${e.name}${e.is_dir ? '/' : ` (${e.size}b)`}`
-          ).join('\n');
+          if (entries.length === 0) return "(empty directory)";
+          return entries
+            .map(
+              (e: any) =>
+                `${e.is_dir ? "📁" : "📄"} ${e.name}${e.is_dir ? "/" : ` (${e.size}b)`}`,
+            )
+            .join("\n");
         } catch (e: any) {
           return `list_dir error: ${e.message}`;
         }
       }
 
-      case 'shell_exec': {
+      case "shell_exec": {
         const sandbox = getSandbox();
-        const result = await sandbox.execute(args.command || '');
-        let output = '';
+        const result = await sandbox.execute(args.command || "");
+        let output = "";
         if (result.stdout) output += result.stdout;
-        if (result.stderr) output += (output ? '\n' : '') + `STDERR: ${result.stderr}`;
-        if (result.timedOut) output += '\n(command timed out)';
-        return output || '(no output)';
+        if (result.stderr)
+          output += (output ? "\n" : "") + `STDERR: ${result.stderr}`;
+        if (result.timedOut) output += "\n(command timed out)";
+        return output || "(no output)";
       }
 
       default:
@@ -437,23 +509,25 @@ let baseUrl = apiUrl || wasm.provider_base_url(provider);
     }
   }
 
-  function generateTitle(msgs: Array<{ role: string; content: string }>): string {
-    const firstUser = msgs.find(m => m.role === 'user');
-    if (!firstUser) return 'New Chat';
+  function generateTitle(
+    msgs: Array<{ role: string; content: string }>,
+  ): string {
+    const firstUser = msgs.find((m) => m.role === "user");
+    if (!firstUser) return "New Chat";
     const text = firstUser.content.slice(0, 50);
-    return text.length < firstUser.content.length ? text + '...' : text;
+    return text.length < firstUser.content.length ? text + "..." : text;
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
     }
   }
 
   function autoResize(el: HTMLTextAreaElement) {
-    el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 150) + 'px';
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 150) + "px";
   }
 </script>
 
@@ -465,13 +539,28 @@ let baseUrl = apiUrl || wasm.provider_base_url(provider);
         <h2>Welcome to EZ-Claw</h2>
         <p>ZeroClaw running in your browser via WebAssembly</p>
         <div class="quick-prompts">
-          <button class="quick-prompt" onclick={() => { inputText = 'Help me write a Python function'; }}>
+          <button
+            class="quick-prompt"
+            onclick={() => {
+              inputText = "Help me write a Python function";
+            }}
+          >
             💡 Write a Python function
           </button>
-          <button class="quick-prompt" onclick={() => { inputText = 'Explain WASM to me'; }}>
+          <button
+            class="quick-prompt"
+            onclick={() => {
+              inputText = "Explain WASM to me";
+            }}
+          >
             📚 Explain WASM
           </button>
-          <button class="quick-prompt" onclick={() => { inputText = 'Debug this code for me'; }}>
+          <button
+            class="quick-prompt"
+            onclick={() => {
+              inputText = "Debug this code for me";
+            }}
+          >
             🔍 Debug code
           </button>
         </div>
@@ -483,7 +572,11 @@ let baseUrl = apiUrl || wasm.provider_base_url(provider);
     {/each}
 
     {#if isStreaming && streamingContent}
-      <MessageBubble role="assistant" content={streamingContent} isStreaming={true} />
+      <MessageBubble
+        role="assistant"
+        content={streamingContent}
+        isStreaming={true}
+      />
     {/if}
 
     {#if toolActivity}
@@ -515,9 +608,16 @@ let baseUrl = apiUrl || wasm.provider_base_url(provider);
         {#if isStreaming}
           <div class="spinner"></div>
         {:else}
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="22" y1="2" x2="11" y2="13"/>
-            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <line x1="22" y1="2" x2="11" y2="13" />
+            <polygon points="22 2 15 22 11 13 2 9 22 2" />
           </svg>
         {/if}
       </button>
@@ -679,7 +779,9 @@ let baseUrl = apiUrl || wasm.provider_base_url(provider);
   }
 
   @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .input-footer {
@@ -697,7 +799,9 @@ let baseUrl = apiUrl || wasm.provider_base_url(provider);
       padding: var(--space-sm) var(--space-md);
     }
 
-    .empty-icon { font-size: 56px; }
+    .empty-icon {
+      font-size: 56px;
+    }
 
     .quick-prompts {
       flex-direction: column;
