@@ -320,9 +320,9 @@ export function wipeoutAll(confirmations: string[]): boolean {
     try {
         localStorage.removeItem('ezclaw_personas');
         localStorage.removeItem('ezclaw_active_persona');
-        localStorage.removeItem('ezclaw_skills');
-        localStorage.removeItem('ezclaw_skill_sets');
-        localStorage.removeItem('ezclaw_active_skill_set');
+        localStorage.removeItem('ezclaw:skills');
+        localStorage.removeItem('ezclaw:skillsets');
+        localStorage.removeItem('ezclaw:active_skillset');
     } catch { /* silent */ }
 
     _persist();

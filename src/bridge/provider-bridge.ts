@@ -59,11 +59,9 @@ export async function streamChat(
     }
 
     // Build endpoint URL
-    // NOTE: Anthropic's native API uses /v1/messages (not /chat/completions).
-    // This works when apiUrl points at an OpenAI-compatible proxy or gateway.
     const endpoint = `${baseUrl}/chat/completions`;
 
-// Build headers using centralized helper
+    // Build headers using centralized helper
     const headers = buildProviderHeaders(config.provider, config.apiKey);
 
     try {
@@ -169,7 +167,7 @@ export async function chatCompletion(
 
     const endpoint = `${baseUrl}/chat/completions`;
 
-const headers = buildProviderHeaders(config.provider, config.apiKey);
+    const headers = buildProviderHeaders(config.provider, config.apiKey);
 
     const response = await fetch(endpoint, {
         method: 'POST',

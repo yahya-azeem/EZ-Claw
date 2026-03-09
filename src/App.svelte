@@ -317,7 +317,7 @@
     <div class="loading-logo">
       <div class="loading-claw">🦀</div>
       <h1>EZ-Claw</h1>
-      <p>Loading ZeroClaw engine...</p>
+      <p>Loading engine...</p>
       <div class="loading-bar">
         <div class="loading-progress"></div>
       </div>
@@ -328,7 +328,7 @@
     <div class="loading-logo">
       <div class="loading-claw">🦀</div>
       <h1>EZ-Claw</h1>
-      <p style="color: var(--error);">Failed to load WASM engine</p>
+      <p style="color: var(--error);">Failed to load engine</p>
       <p
         style="font-size: var(--text-xs); color: var(--text-tertiary); max-width: 400px; word-break: break-all;"
       >

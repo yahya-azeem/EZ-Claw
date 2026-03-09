@@ -282,8 +282,8 @@ function gatherLocalData(): Record<string, string> {
 
     // Skills
     try {
-        const skills = localStorage.getItem('ezclaw_skill_sets');
-        const activeSkills = localStorage.getItem('ezclaw_skills');
+        const skills = localStorage.getItem('ezclaw:skillsets');
+        const activeSkills = localStorage.getItem('ezclaw:skills');
         data['ezclaw_skills.json'] = JSON.stringify({
             skill_sets: skills ? JSON.parse(skills) : [],
             active_skills: activeSkills ? JSON.parse(activeSkills) : [],
@@ -294,7 +294,7 @@ function gatherLocalData(): Record<string, string> {
     try {
         const keys = [
             'ezclaw_active_persona',
-            'ezclaw_active_skill_set',
+            'ezclaw:active_skillset',
         ];
         const config: Record<string, string> = {};
         for (const key of keys) {
@@ -369,10 +369,10 @@ export async function syncFromCloud(): Promise<void> {
             const content = await readFile(skillsFile.id);
             const parsed = JSON.parse(content);
             if (parsed.skill_sets) {
-                localStorage.setItem('ezclaw_skill_sets', JSON.stringify(parsed.skill_sets));
+                localStorage.setItem('ezclaw:skillsets', JSON.stringify(parsed.skill_sets));
             }
             if (parsed.active_skills) {
-                localStorage.setItem('ezclaw_skills', JSON.stringify(parsed.active_skills));
+                localStorage.setItem('ezclaw:skills', JSON.stringify(parsed.active_skills));
             }
         }
 
