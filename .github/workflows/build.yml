@@ -118,14 +118,12 @@ jobs:
           if [ -f "containers/alpine-amd64.wasm" ] && [ $(stat -c%s "containers/alpine-amd64.wasm") -gt 100000000 ]; then
             echo "Container blob cached ($(stat -c%s containers/alpine-amd64.wasm) bytes), skipping build"
           else
-            echo "Building Alpine container blob with container2wasm..."
-            # Install container2wasm
-            go install github.com/container2wasm/container2wasm/cmd/c2w@latest 2>/dev/null || {
-              echo "Downloading c2w binary..."
+            echo "Downloading c2w binary..."
             curl -sL "https://github.com/container2wasm/container2wasm/releases/download/v0.8.3/container2wasm-v0.8.3-linux-amd64.tar.gz" | tar xz
             chmod +x c2w
             sudo mv c2w /usr/local/bin/
-            }
+
+            echo "Building Alpine container blob with container2wasm..."
             # Build Alpine Linux container → WASM blob
             c2w --target-arch=amd64 alpine:3.20 containers/alpine-amd64.wasm
             echo "Built: $(stat -c%s containers/alpine-amd64.wasm) bytes"
