@@ -90,7 +90,8 @@ class WasiSandbox {
         const container = new WASIContainer();
 
         try {
-            const wasmPath = `/containers/alpine-${arch}.wasm`;
+            const base = import.meta.env.BASE_URL || '/';
+            const wasmPath = `${base}containers/alpine-${arch}.wasm`.replace(/\/+/g, '/');
             const loadedContainer = await WASIContainer.load(wasmPath);
             await loadedContainer.start();
             console.log('[WASI] Container loaded successfully');
