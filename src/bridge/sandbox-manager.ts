@@ -1,19 +1,25 @@
 /**
- * Sandbox Manager — Two-tier sandboxed shell execution.
+ * Sandbox Manager — Three-tier sandboxed shell execution.
  *
  * Adapted from IronClaw's SandboxPolicy for browser environments:
  *
- * | Tier        | Filesystem       | Network            | Platform           |
- * |-------------|-----------------|--------------------|--------------------|  
- * | WASI        | OPFS workspace  | Proxied+allowlist  | All (iPhone safe)  |
- * | Native CLI  | Real host FS    | Full               | Requires companion |
+ * | Tier           | Filesystem       | Network            | Platform           |
+ * |----------------|-----------------|--------------------|--------------------|  
+ * | container2wasm | VFS + OPFS      | Proxied            | All (primary)      |
+ * | WASI (BusyBox) | OPFS workspace  | Proxied+allowlist  | All (fallback)     |
+ * | Native CLI     | Real host FS    | Full               | Requires companion |
  *
  * All tiers go through the WASM security pipeline before execution.
  */
 
 import { WASIContainer, detectArchitecture, type CommandResult } from './wasi-container';
+import {
+    isContainerReady,
+    executeCommand as c2wExecute,
+    getContainerStatus,
+} from './container2wasm-runtime';
 
-export type SandboxTier = 'wasi' | 'native';
+export type SandboxTier = 'container2wasm' | 'wasi' | 'native';
 
 export interface SandboxConfig {
     tier: SandboxTier;
@@ -46,7 +52,7 @@ export interface AuditEntry {
 }
 
 const DEFAULT_CONFIG: SandboxConfig = {
-    tier: 'wasi',
+    tier: 'container2wasm',
     enabled: false,
     timeoutMs: 30000,
     maxOutputBytes: 100_000,
@@ -320,6 +326,35 @@ export class SandboxManager {
         let result: ShellResult;
 
         switch (this.config.tier) {
+            case 'container2wasm': {
+                if (isContainerReady()) {
+                    const start = performance.now();
+                    try {
+                        const c2wResult = await c2wExecute(command, this.config.timeoutMs);
+                        result = {
+                            exitCode: c2wResult.exit_code,
+                            stdout: c2wResult.stdout.slice(0, this.config.maxOutputBytes),
+                            stderr: c2wResult.stderr.slice(0, this.config.maxOutputBytes),
+                            durationMs: c2wResult.duration_ms,
+                            timedOut: c2wResult.exit_code === 124,
+                            truncated: c2wResult.stdout.length > this.config.maxOutputBytes,
+                        };
+                    } catch (e: any) {
+                        result = {
+                            exitCode: 1,
+                            stdout: '',
+                            stderr: e.message,
+                            durationMs: performance.now() - start,
+                            timedOut: false,
+                            truncated: false,
+                        };
+                    }
+                } else {
+                    // Fallback to WASI BusyBox
+                    result = await this.wasi.execute(command, this.config.timeoutMs);
+                }
+                break;
+            }
             case 'wasi':
                 result = await this.wasi.execute(command, this.config.timeoutMs);
                 break;
@@ -391,6 +426,13 @@ export class SandboxManager {
     /** Get sandbox status info. */
     getStatus(): { tier: SandboxTier; available: boolean; info: string } {
         switch (this.config.tier) {
+            case 'container2wasm': {
+                const status = getContainerStatus();
+                if (status.ready) {
+                    return { tier: 'container2wasm', available: true, info: `${status.os} Linux (${status.arch}) via container2wasm` };
+                }
+                return { tier: 'container2wasm', available: true, info: 'BusyBox fallback (container not loaded)' };
+            }
             case 'wasi':
                 return { tier: 'wasi', available: true, info: 'WASI sandbox (BusyBox shell + OPFS workspace)' };
             case 'native':

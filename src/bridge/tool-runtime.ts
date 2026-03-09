@@ -21,6 +21,13 @@ import { getWasm } from './wasm-loader';
 import { storeMemory, recallMemories, listMemories } from './memory-bridge';
 import { setFact, loadIdentity, updateIdentityField, saveIdentity, type AgentIdentity } from './identity-bridge';
 import { WASIContainer, type CommandResult } from './wasi-container';
+import {
+    isContainerReady,
+    executeCommand as c2wExecuteCommand,
+    getContainerOS,
+    getContainerArch,
+    getContainerStatus,
+} from './container2wasm-runtime';
 
 let _wasiContainer: WASIContainer | null = null;
 
@@ -362,10 +369,19 @@ function toolListDir(workspace: WasmWorkspace, path: string): string {
 }
 
 /**
- * Shell execution via WASI container.
+ * Shell execution — routes through container2wasm (real Alpine Linux) first,
+ * falls back to BusyBox WASI shell if no container is loaded.
  */
 async function toolShellExec(command: string, args: string[] = [], cwd: string = '/workspace'): Promise<string> {
     try {
+        // Try container2wasm first (real Linux)
+        if (isContainerReady()) {
+            const fullCmd = args.length > 0 ? `${command} ${args.join(' ')}` : command;
+            const result = await c2wExecuteCommand(fullCmd);
+            return formatC2WResult(result);
+        }
+
+        // Fallback to BusyBox WASI shell
         const container = await getWasiContainer();
         const result = await container.run(command, args);
         return formatShellResult(result);
@@ -376,6 +392,11 @@ async function toolShellExec(command: string, args: string[] = [], cwd: string =
 
 /**
  * Run shell command - the primary tool for agent shell access.
+ * Routes through container2wasm (real Alpine Linux) if available,
+ * falls back to BusyBox WASI container otherwise.
+ *
+ * The agent is informed of the underlying OS so it can write
+ * appropriate commands (e.g., apk vs apt).
  */
 async function toolRunShellCommand(
     command: string,
@@ -383,13 +404,31 @@ async function toolRunShellCommand(
     env: Record<string, string> = {}
 ): Promise<string> {
     try {
+        // Try container2wasm first (real Linux)
+        if (isContainerReady()) {
+            const fullCmd = args.length > 0 ? `${command} ${args.join(' ')}` : command;
+            const result = await c2wExecuteCommand(fullCmd);
+            return formatC2WResult(result);
+        }
+
+        // Fallback to BusyBox WASI shell
         const container = await getWasiContainer();
-        const fullCommand = args.length > 0 ? `${command} ${args.join(' ')}` : command;
         const result = await container.run(command, args, env);
         return formatShellResult(result);
     } catch (e: any) {
         return `Shell execution error: ${e.message}`;
     }
+}
+
+/**
+ * Format container2wasm result for agent consumption.
+ */
+function formatC2WResult(result: { stdout: string; stderr: string; exit_code: number; duration_ms: number }): string {
+    let output = '';
+    if (result.stdout) output += result.stdout;
+    if (result.stderr) output += (output ? '\n' : '') + `[stderr] ${result.stderr}`;
+    output += (output ? '\n' : '') + `[exit code: ${result.exit_code}] (${result.duration_ms.toFixed(0)}ms)`;
+    return output;
 }
 
 /**
@@ -412,11 +451,20 @@ function formatShellResult(result: CommandResult): string {
 }
 
 /**
- * Get WASI container info.
+ * Get container info — returns container2wasm status if active,
+ * otherwise falls back to BusyBox WASI container info.
  */
 export async function getContainerInfo(): Promise<any> {
+    if (isContainerReady()) {
+        const status = getContainerStatus();
+        return {
+            ...status,
+            type: 'container2wasm',
+            description: `${status.os} Linux (${status.arch}) via container2wasm`,
+        };
+    }
     const container = await getWasiContainer();
-    return container.getInfo();
+    return { ...container.getInfo(), type: 'busybox-fallback' };
 }
 
 // ── Credential Injection (IronClaw Pattern) ───────────────────────

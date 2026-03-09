@@ -1,19 +1,27 @@
 <script lang="ts">
     /**
-     * SkillsPanel — browse, enable/disable, and create skills.
-     * Note: WasmSkillRegistry not yet implemented in Rust.
+     * SkillsPanel — manage skills, tools, and skill sets.
+     * Now backed by the modular skills-layer for hot-swapping.
      */
-
-    interface SkillInfo {
-        name: string;
-        description: string;
-        version: string;
-        trust: string;
-        source: string;
-        enabled: boolean;
-        tags: string[];
-        required_tools: string[];
-    }
+    import {
+        initSkills,
+        getSkills,
+        addSkill,
+        removeSkill,
+        updateSkill,
+        getSkillInstructions,
+        getSkillTools,
+        saveSkillSet,
+        listSkillSets,
+        swapSkillSet,
+        deleteSkillSet,
+        exportSkills,
+        importSkills,
+        getActiveSkillSetId,
+        onSkillEvent,
+        type SkillDef,
+        type SkillSet,
+    } from "../layers/skills-layer";
 
     interface Props {
         isOpen: boolean;
@@ -22,52 +30,103 @@
 
     let { isOpen, onClose }: Props = $props();
 
-    let skills: SkillInfo[] = $state([]);
+    let skills: SkillDef[] = $state([]);
+    let skillSets: SkillSet[] = $state([]);
+    let activeSkillSetId: string | null = $state(null);
     let showCreateForm = $state(false);
-    let newSkillMd = $state(`---
-name: my-skill
-description: What this skill does
-version: 1.0.0
-trust: untrusted
-tags: [tag1, tag2]
-activation_keywords: [keyword1, keyword2]
-required_tools: []
----
-Your skill instructions here.`);
+    let showSkillSets = $state(false);
+    let showExportImport = $state(false);
+    let newSkillName = $state("");
+    let newSkillDesc = $state("");
+    let newSkillInstructions = $state("");
+    let newSkillSetLabel = $state("");
+    let importJson = $state("");
+    let editingSkillId: string | null = $state(null);
 
-    function toggleSkill(name: string) {
-        skills = skills.map((s) =>
-            s.name === name ? { ...s, enabled: !s.enabled } : s,
-        );
+    $effect(() => {
+        if (isOpen) {
+            skills = initSkills();
+            skillSets = listSkillSets();
+            activeSkillSetId = getActiveSkillSetId();
+        }
+    });
+
+    function handleAddSkill() {
+        if (newSkillName.trim() && newSkillDesc.trim()) {
+            addSkill({
+                name: newSkillName.trim(),
+                description: newSkillDesc.trim(),
+                instructions: newSkillInstructions.trim(),
+                tools: [],
+                notes: [],
+            });
+            skills = getSkills();
+            showCreateForm = false;
+            newSkillName = "";
+            newSkillDesc = "";
+            newSkillInstructions = "";
+        }
     }
 
-    function removeSkill(name: string) {
-        if (skills.find((s) => s.name === name)?.source === "bundled") return;
-        skills = skills.filter((s) => s.name !== name);
+    function handleRemoveSkill(skillId: string) {
+        if (confirm("Remove this skill?")) {
+            removeSkill(skillId);
+            skills = getSkills();
+        }
     }
 
-    function createSkill() {
-        // TODO: call WasmSkillRegistry.register_skill(newSkillMd, 'workspace')
-        showCreateForm = false;
+    function handleAddNote(skillId: string) {
+        const note = prompt("Add a note:");
+        if (note) {
+            const skill = skills.find((s) => s.id === skillId);
+            if (skill) {
+                updateSkill(skillId, { notes: [...skill.notes, note] });
+                skills = getSkills();
+            }
+        }
     }
 
-    const TRUST_COLORS: Record<string, string> = {
-        trusted: "var(--success)",
-        verified: "var(--accent-primary)",
-        untrusted: "var(--warning)",
-    };
+    function handleSaveSkillSet() {
+        if (newSkillSetLabel.trim()) {
+            saveSkillSet(newSkillSetLabel.trim());
+            skillSets = listSkillSets();
+            newSkillSetLabel = "";
+        }
+    }
 
-    const TRUST_ICONS: Record<string, string> = {
-        trusted: "🔒",
-        verified: "✓",
-        untrusted: "⚠️",
-    };
+    function handleSwapSkillSet(setId: string) {
+        swapSkillSet(setId);
+        skills = getSkills();
+        activeSkillSetId = getActiveSkillSetId();
+    }
 
-    const SOURCE_LABELS: Record<string, string> = {
-        bundled: "Built-in",
-        managed: "Installed",
-        workspace: "Custom",
-    };
+    function handleDeleteSkillSet(setId: string) {
+        if (confirm("Delete this skill set?")) {
+            deleteSkillSet(setId);
+            skillSets = listSkillSets();
+        }
+    }
+
+    function handleExport() {
+        const json = exportSkills();
+        navigator.clipboard.writeText(json);
+        alert("Skills exported to clipboard!");
+    }
+
+    function handleImport() {
+        if (importJson.trim()) {
+            const count = importSkills(importJson.trim());
+            if (count > 0) {
+                skills = getSkills();
+                skillSets = listSkillSets();
+                importJson = "";
+                showExportImport = false;
+                alert(`Imported ${count} items!`);
+            } else {
+                alert("Import failed — invalid JSON.");
+            }
+        }
+    }
 </script>
 
 {#if isOpen}
@@ -82,106 +141,219 @@ Your skill instructions here.`);
                 <div class="header-title">
                     <span>⚡</span>
                     <h3>Skills Engine</h3>
-                    <span class="skill-count"
-                        >{skills.filter((s) => s.enabled)
-                            .length}/{skills.length}</span
-                    >
+                    <span class="skill-count">{skills.length} skills</span>
                 </div>
                 <div class="header-actions">
                     <button
-                        class="btn btn-sm btn-primary"
-                        onclick={() => (showCreateForm = !showCreateForm)}
+                        class="btn btn-sm"
+                        class:active={showSkillSets}
+                        onclick={() => {
+                            showSkillSets = !showSkillSets;
+                            showCreateForm = false;
+                            showExportImport = false;
+                        }}
                     >
-                        {showCreateForm ? "✕ Cancel" : "+ New Skill"}
+                        🔀 Skill Sets
                     </button>
                     <button
-                        class="btn btn-ghost btn-icon"
-                        onclick={onClose}
-                        aria-label="Close"
+                        class="btn btn-sm"
+                        onclick={() => {
+                            showCreateForm = !showCreateForm;
+                            showSkillSets = false;
+                            showExportImport = false;
+                        }}
                     >
-                        <svg
-                            width="18"
-                            height="18"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                        >
-                            <line x1="18" y1="6" x2="6" y2="18" /><line
-                                x1="6"
-                                y1="6"
-                                x2="18"
-                                y2="18"
-                            />
-                        </svg>
+                        ➕ New Skill
                     </button>
+                    <button
+                        class="btn btn-sm"
+                        onclick={() => {
+                            showExportImport = !showExportImport;
+                            showSkillSets = false;
+                            showCreateForm = false;
+                        }}
+                    >
+                        📦 Import/Export
+                    </button>
+                    <button
+                        class="close-btn"
+                        onclick={onClose}
+                        aria-label="Close">✕</button
+                    >
                 </div>
             </div>
 
-            {#if showCreateForm}
-                <div class="create-form">
-                    <textarea
-                        class="skill-editor"
-                        bind:value={newSkillMd}
-                        rows="12"
-                    ></textarea>
-                    <button class="btn btn-primary" onclick={createSkill}
-                        >Register Skill</button
-                    >
+            <!-- Skill Sets Panel -->
+            {#if showSkillSets}
+                <div class="sub-panel">
+                    <div class="sub-header">
+                        <h4>🔀 Skill Sets — Hot Swap</h4>
+                        <div class="save-form">
+                            <input
+                                type="text"
+                                bind:value={newSkillSetLabel}
+                                placeholder="Save current as..."
+                                class="input-sm"
+                            />
+                            <button
+                                class="btn btn-sm btn-primary"
+                                onclick={handleSaveSkillSet}>💾 Save</button
+                            >
+                        </div>
+                    </div>
+                    <div class="set-list">
+                        {#each skillSets as set}
+                            <div
+                                class="set-card"
+                                class:active={activeSkillSetId === set.id}
+                            >
+                                <div class="set-info">
+                                    <span class="set-name">{set.label}</span>
+                                    <span class="set-detail"
+                                        >{set.skills.length} skills · {new Date(
+                                            set.createdAt,
+                                        ).toLocaleDateString()}</span
+                                    >
+                                </div>
+                                <div class="set-actions">
+                                    {#if activeSkillSetId === set.id}
+                                        <span class="active-badge">Active</span>
+                                    {:else}
+                                        <button
+                                            class="btn btn-sm btn-primary"
+                                            onclick={() =>
+                                                handleSwapSkillSet(set.id)}
+                                            >⚡ Swap</button
+                                        >
+                                    {/if}
+                                    <button
+                                        class="btn btn-sm btn-ghost"
+                                        onclick={() =>
+                                            handleDeleteSkillSet(set.id)}
+                                        >🗑️</button
+                                    >
+                                </div>
+                            </div>
+                        {/each}
+                        {#if skillSets.length === 0}
+                            <p class="empty-hint">
+                                No saved skill sets. Save your current skills to
+                                swap later.
+                            </p>
+                        {/if}
+                    </div>
                 </div>
             {/if}
 
+            <!-- Create Skill Form -->
+            {#if showCreateForm}
+                <div class="sub-panel">
+                    <h4>➕ New Skill</h4>
+                    <div class="create-form">
+                        <input
+                            type="text"
+                            bind:value={newSkillName}
+                            placeholder="Skill name"
+                            class="input-sm"
+                        />
+                        <input
+                            type="text"
+                            bind:value={newSkillDesc}
+                            placeholder="Description"
+                            class="input-sm"
+                        />
+                        <textarea
+                            bind:value={newSkillInstructions}
+                            placeholder="Instructions (injected into system prompt)"
+                            rows="4"
+                            class="input-sm textarea"
+                        ></textarea>
+                        <button class="btn btn-primary" onclick={handleAddSkill}
+                            >Create Skill</button
+                        >
+                    </div>
+                </div>
+            {/if}
+
+            <!-- Import/Export -->
+            {#if showExportImport}
+                <div class="sub-panel">
+                    <h4>📦 Import / Export</h4>
+                    <div class="ie-actions">
+                        <button class="btn btn-primary" onclick={handleExport}
+                            >📋 Export to Clipboard</button
+                        >
+                        <textarea
+                            bind:value={importJson}
+                            placeholder="Paste exported JSON here..."
+                            rows="4"
+                            class="input-sm textarea"
+                        ></textarea>
+                        <button class="btn btn-primary" onclick={handleImport}
+                            >📥 Import</button
+                        >
+                    </div>
+                </div>
+            {/if}
+
+            <!-- Skills List -->
             <div class="skills-list">
                 {#each skills as skill}
-                    <div class="skill-card" class:disabled={!skill.enabled}>
+                    <div class="skill-card">
                         <div class="skill-header">
                             <div class="skill-meta">
                                 <span class="skill-name">{skill.name}</span>
-                                <span
-                                    class="trust-badge"
-                                    style:color={TRUST_COLORS[skill.trust]}
-                                >
-                                    {TRUST_ICONS[skill.trust]}
-                                    {skill.trust}
-                                </span>
-                                <span class="source-badge"
-                                    >{SOURCE_LABELS[skill.source] ||
-                                        skill.source}</span
-                                >
                             </div>
                             <div class="skill-actions">
-                                <label class="toggle">
-                                    <input
-                                        type="checkbox"
-                                        checked={skill.enabled}
-                                        onchange={() => toggleSkill(skill.name)}
-                                    />
-                                    <span class="slider"></span>
-                                </label>
-                                {#if skill.source !== "bundled"}
-                                    <button
-                                        class="btn btn-ghost btn-icon btn-sm"
-                                        onclick={() => removeSkill(skill.name)}
-                                        >🗑️</button
-                                    >
-                                {/if}
+                                <button
+                                    class="btn btn-sm btn-ghost"
+                                    onclick={() => handleAddNote(skill.id)}
+                                    title="Add note">📝</button
+                                >
+                                <button
+                                    class="btn btn-sm btn-ghost"
+                                    onclick={() => handleRemoveSkill(skill.id)}
+                                    title="Remove">🗑️</button
+                                >
                             </div>
                         </div>
                         <p class="skill-desc">{skill.description}</p>
-                        <div class="skill-footer">
-                            <div class="skill-tags">
-                                {#each skill.tags as tag}
-                                    <span class="tag">{tag}</span>
+                        {#if skill.instructions}
+                            <div class="skill-instructions">
+                                <span class="label">Instructions:</span>
+                                <p>{skill.instructions}</p>
+                            </div>
+                        {/if}
+                        {#if skill.notes.length > 0}
+                            <div class="skill-notes">
+                                <span class="label">Notes:</span>
+                                {#each skill.notes as note}
+                                    <span class="note-chip">{note}</span>
                                 {/each}
                             </div>
+                        {/if}
+                        {#if skill.tools.length > 0}
                             <div class="skill-tools">
-                                {#each skill.required_tools as tool}
-                                    <span class="tool-chip">{tool}</span>
+                                <span class="label">Tools:</span>
+                                {#each skill.tools as tool}
+                                    <span class="tool-chip"
+                                        >{tool.function.name}</span
+                                    >
                                 {/each}
                             </div>
-                        </div>
+                        {/if}
                     </div>
                 {/each}
+                {#if skills.length === 0}
+                    <div class="empty-state">
+                        <p>No skills configured.</p>
+                        <button
+                            class="btn btn-primary"
+                            onclick={() => (showCreateForm = true)}
+                            >Create your first skill</button
+                        >
+                    </div>
+                {/if}
             </div>
         </div>
     </div>
@@ -191,33 +363,34 @@ Your skill instructions here.`);
     .skills-overlay {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.5);
+        background: rgba(0, 0, 0, 0.6);
         backdrop-filter: blur(4px);
-        -webkit-backdrop-filter: blur(4px);
-        z-index: 100;
+        z-index: 1000;
         display: flex;
-        justify-content: center;
         align-items: center;
-        animation: fadeIn 0.2s ease-out;
+        justify-content: center;
         padding: var(--space-lg);
     }
 
     .skills-panel {
-        width: min(650px, 95vw);
-        max-height: 85vh;
+        width: 100%;
+        max-width: 750px;
+        max-height: 80vh;
         display: flex;
         flex-direction: column;
         border-radius: var(--radius-lg);
         overflow: hidden;
-        animation: fadeIn 0.3s ease-out;
     }
 
     .panel-header {
         display: flex;
-        align-items: center;
         justify-content: space-between;
-        padding: var(--space-md) var(--space-lg);
-        border-bottom: 1px solid var(--border);
+        align-items: center;
+        padding: var(--space-sm) var(--space-md);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(22, 27, 34, 0.9);
+        flex-wrap: wrap;
+        gap: var(--space-sm);
     }
 
     .header-title {
@@ -225,201 +398,234 @@ Your skill instructions here.`);
         align-items: center;
         gap: var(--space-sm);
     }
-
     .header-title h3 {
         margin: 0;
-        font-size: var(--text-lg);
+        font-size: var(--text-md);
     }
-
     .skill-count {
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-        background: var(--bg-tertiary);
+        background: rgba(99, 102, 241, 0.15);
+        color: var(--accent-primary);
         padding: 2px 8px;
-        border-radius: var(--radius-full);
+        border-radius: var(--radius-sm);
+        font-size: var(--text-xs);
     }
 
     .header-actions {
         display: flex;
+        gap: var(--space-xs);
         align-items: center;
+    }
+
+    .close-btn {
+        background: none;
+        border: none;
+        color: var(--text-tertiary);
+        font-size: 18px;
+        cursor: pointer;
+        padding: 4px 8px;
+    }
+    .close-btn:hover {
+        color: var(--text-primary);
+    }
+
+    .sub-panel {
+        padding: var(--space-md);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        background: rgba(0, 0, 0, 0.15);
+    }
+    .sub-panel h4 {
+        margin: 0 0 var(--space-sm);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+    }
+    .sub-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
         gap: var(--space-sm);
+        margin-bottom: var(--space-sm);
+    }
+    .save-form {
+        display: flex;
+        gap: var(--space-xs);
     }
 
     .create-form {
-        padding: var(--space-md) var(--space-lg);
-        border-bottom: 1px solid var(--border);
         display: flex;
         flex-direction: column;
-        gap: var(--space-sm);
+        gap: var(--space-xs);
+    }
+    .ie-actions {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-xs);
     }
 
-    .skill-editor {
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
+    .input-sm {
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: var(--radius-sm);
         color: var(--text-primary);
-        font-family: var(--font-mono);
+        padding: 6px 10px;
         font-size: var(--text-sm);
-        padding: var(--space-md);
+    }
+    .textarea {
+        font-family: "JetBrains Mono", monospace;
         resize: vertical;
-        outline: none;
-        line-height: 1.5;
+        min-height: 60px;
     }
 
-    .skill-editor:focus {
-        border-color: var(--accent-primary);
+    .set-list {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-xs);
+    }
+    .set-card {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: var(--space-sm) var(--space-md);
+        background: rgba(0, 0, 0, 0.12);
+        border-radius: var(--radius-sm);
+        border: 1px solid transparent;
+    }
+    .set-card.active {
+        border-color: rgba(99, 102, 241, 0.4);
+    }
+    .set-info {
+        display: flex;
+        flex-direction: column;
+    }
+    .set-name {
+        font-size: var(--text-sm);
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+    .set-detail {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+    }
+    .set-actions {
+        display: flex;
+        gap: var(--space-xs);
+        align-items: center;
+    }
+    .active-badge {
+        background: rgba(63, 185, 80, 0.15);
+        color: #3fb950;
+        padding: 2px 8px;
+        border-radius: var(--radius-sm);
+        font-size: var(--text-xs);
+        font-weight: 600;
     }
 
     .skills-list {
         flex: 1;
         overflow-y: auto;
-        padding: var(--space-md) var(--space-lg);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-md);
+        padding: var(--space-md);
     }
 
     .skill-card {
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
         padding: var(--space-md);
-        transition: all var(--transition);
-    }
-
-    .skill-card:hover {
-        border-color: rgba(148, 163, 184, 0.2);
-    }
-    .skill-card.disabled {
-        opacity: 0.5;
+        background: rgba(0, 0, 0, 0.12);
+        border-radius: var(--radius-md);
+        margin-bottom: var(--space-sm);
+        border: 1px solid rgba(255, 255, 255, 0.06);
     }
 
     .skill-header {
         display: flex;
-        align-items: center;
         justify-content: space-between;
+        align-items: center;
         margin-bottom: var(--space-xs);
     }
-
-    .skill-meta {
-        display: flex;
-        align-items: center;
-        gap: var(--space-sm);
-        flex-wrap: wrap;
-    }
-
     .skill-name {
         font-weight: 600;
-        font-family: var(--font-mono);
         font-size: var(--text-sm);
+        color: var(--text-primary);
     }
-
-    .trust-badge {
-        font-size: var(--text-xs);
-        font-weight: 500;
-    }
-
-    .source-badge {
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-        background: var(--bg-secondary);
-        padding: 1px 6px;
-        border-radius: var(--radius-sm);
-    }
-
     .skill-actions {
         display: flex;
-        align-items: center;
-        gap: var(--space-xs);
-    }
-
-    .skill-desc {
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-        margin-bottom: var(--space-sm);
-    }
-
-    .skill-footer {
-        display: flex;
-        gap: var(--space-sm);
-        flex-wrap: wrap;
-        align-items: center;
-    }
-
-    .skill-tags,
-    .skill-tools {
-        display: flex;
         gap: 4px;
-        flex-wrap: wrap;
     }
-
-    .tag {
+    .skill-desc {
         font-size: var(--text-xs);
-        padding: 1px 6px;
-        border-radius: var(--radius-full);
-        background: rgba(59, 130, 246, 0.1);
-        color: var(--text-accent);
+        color: var(--text-secondary);
+        margin: 0 0 var(--space-xs);
     }
 
+    .skill-instructions,
+    .skill-notes,
+    .skill-tools {
+        margin-top: var(--space-xs);
+        font-size: var(--text-xs);
+    }
+    .label {
+        color: var(--text-tertiary);
+        font-weight: 600;
+        margin-right: var(--space-xs);
+    }
+    .skill-instructions p {
+        margin: 2px 0 0;
+        color: var(--text-secondary);
+        font-style: italic;
+    }
+    .note-chip,
     .tool-chip {
-        font-size: var(--text-xs);
+        display: inline-block;
+        background: rgba(99, 102, 241, 0.1);
+        color: var(--accent-primary);
         padding: 1px 6px;
         border-radius: var(--radius-sm);
-        background: var(--bg-secondary);
+        font-size: 10px;
+        margin: 2px;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: var(--space-xl);
         color: var(--text-tertiary);
-        font-family: var(--font-mono);
+    }
+    .empty-hint {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        font-style: italic;
     }
 
-    /* Toggle switch */
-    .toggle {
-        position: relative;
-        display: inline-block;
-        width: 36px;
-        height: 20px;
-    }
-
-    .toggle input {
-        opacity: 0;
-        width: 0;
-        height: 0;
-    }
-
-    .slider {
-        position: absolute;
+    .btn {
         cursor: pointer;
-        inset: 0;
-        background: var(--bg-secondary);
-        border-radius: 20px;
-        transition: 0.3s;
+        border: none;
+        border-radius: var(--radius-sm);
+        font-size: var(--text-xs);
+        padding: 4px 10px;
+        transition: all 0.15s;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text-secondary);
     }
-
-    .slider::before {
-        content: "";
-        position: absolute;
-        height: 14px;
-        width: 14px;
-        left: 3px;
-        bottom: 3px;
-        background: white;
-        border-radius: 50%;
-        transition: 0.3s;
+    .btn:hover {
+        background: rgba(255, 255, 255, 0.1);
     }
-
-    .toggle input:checked + .slider {
-        background: var(--accent-primary);
+    .btn.active {
+        background: rgba(99, 102, 241, 0.2);
+        color: var(--accent-primary);
     }
-    .toggle input:checked + .slider::before {
-        transform: translateX(16px);
+    .btn-sm {
+        font-size: var(--text-xs);
+        padding: 4px 10px;
     }
-
-    @media (max-width: 768px) {
-        .skills-panel {
-            width: 100vw;
-            max-height: 100vh;
-            border-radius: 0;
-        }
-        .skills-overlay {
-            padding: 0;
-        }
+    .btn-primary {
+        background: rgba(99, 102, 241, 0.25);
+        color: var(--accent-primary);
+    }
+    .btn-primary:hover {
+        background: rgba(99, 102, 241, 0.4);
+    }
+    .btn-ghost {
+        background: none;
+        color: var(--text-secondary);
+    }
+    .btn-ghost:hover {
+        background: rgba(255, 255, 255, 0.05);
     }
 </style>

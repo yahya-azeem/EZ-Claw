@@ -18,7 +18,7 @@
         type: "input" | "stdout" | "stderr" | "info";
     }> = $state([]);
     let inputText = $state("");
-    let currentTier: SandboxTier = $state("wasi");
+    let currentTier: SandboxTier = $state("container2wasm");
     let isExecuting = $state(false);
     let nativeUrl = $state("ws://localhost:9229");
     let showTierMenu = $state(false);
@@ -28,7 +28,7 @@
     let manager: SandboxManager | null = null;
 
     onMount(() => {
-        manager = new SandboxManager({ tier: "wasi", enabled: true });
+        manager = new SandboxManager({ tier: "container2wasm", enabled: true });
 
         // Listen for output
         manager.onOutput((line) => {
@@ -172,12 +172,24 @@
                             <div class="tier-menu">
                                 <button
                                     class="tier-option"
+                                    class:active={currentTier ===
+                                        "container2wasm"}
+                                    onclick={() => changeTier("container2wasm")}
+                                >
+                                    <span class="tier-icon">🐧</span> Alpine
+                                    (c2w)
+                                    <span class="tier-desc"
+                                        >Real Linux via container2wasm</span
+                                    >
+                                </button>
+                                <button
+                                    class="tier-option"
                                     class:active={currentTier === "wasi"}
                                     onclick={() => changeTier("wasi")}
                                 >
                                     <span class="tier-icon">🌐</span> WASI
                                     <span class="tier-desc"
-                                        >BusyBox shell (all platforms)</span
+                                        >BusyBox shell (fallback)</span
                                     >
                                 </button>
                                 <button
