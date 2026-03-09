@@ -13,8 +13,10 @@
   import ChannelsPanel from "./components/ChannelsPanel.svelte";
   import PersonaManager from "./components/PersonaManager.svelte";
   import PanicButton from "./components/PanicButton.svelte";
+  import CloudSyncPanel from "./components/CloudSyncPanel.svelte";
   import { initWasm, isWasmReady } from "./bridge/wasm-loader";
   import "./bridge/agent-api"; // Expose window.EZClaw headless API
+  import { initCloudSync } from "./bridge/cloud-sync";
   import {
     initOrchestrator,
     createClaw,
@@ -30,6 +32,8 @@
   import {
     initStorage,
     getAllSessions,
+    saveSession,
+    deleteSession,
     getConfig,
     saveConfig,
     type SessionData,
@@ -53,6 +57,7 @@
   let showTerminal = $state(false);
   let showChannels = $state(false);
   let showPersonas = $state(false);
+  let showCloudSync = $state(false);
 
   // Session state
   let sessions: SessionData[] = $state([]);
@@ -138,6 +143,7 @@
       // Initialize storage first (always available)
       await initStorage();
       initOrchestrator();
+      initCloudSync();
 
       // Try to initialize WASM
       try {
@@ -262,6 +268,8 @@
     activeSessionId = claw.id;
     activateClawLayers(claw.id);
     showSidebar = false;
+    // Persist immediately to IndexedDB so claws survive refresh
+    saveSession(session);
   }
 
   function handleSelectSession(id: string) {
@@ -275,6 +283,8 @@
     if (activeSessionId === id) {
       activeSessionId = sessions.length > 0 ? sessions[0].id : null;
     }
+    // Also delete from IndexedDB
+    deleteSession(id);
   }
 
   function handleSessionUpdate(updated: SessionData) {
@@ -359,6 +369,7 @@
         onOpenTerminal={() => (showTerminal = true)}
         onOpenChannels={() => (showChannels = true)}
         onOpenPersonas={() => (showPersonas = true)}
+        onOpenCloudSync={() => (showCloudSync = true)}
       />
       <PanicButton
         activeClawId={activeSessionId}
@@ -435,6 +446,9 @@
   <ChannelsPanel isOpen={showChannels} onClose={() => (showChannels = false)} />
   {#if showPersonas}
     <PersonaManager onClose={() => (showPersonas = false)} />
+  {/if}
+  {#if showCloudSync}
+    <CloudSyncPanel onClose={() => (showCloudSync = false)} />
   {/if}
 {/if}
 

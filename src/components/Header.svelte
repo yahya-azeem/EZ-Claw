@@ -13,6 +13,7 @@
     onOpenTerminal: () => void;
     onOpenChannels: () => void;
     onOpenPersonas: () => void;
+    onOpenCloudSync: () => void;
   }
 
   let {
@@ -29,6 +30,7 @@
     onOpenTerminal,
     onOpenChannels,
     onOpenPersonas,
+    onOpenCloudSync,
   }: Props = $props();
 </script>
 
@@ -157,6 +159,23 @@
           d="M12 2v6M12 22v-6M6 12H2M22 12h-4M19.07 4.93l-3.54 3.54M8.46 15.54l-3.54 3.54M4.93 4.93l3.54 3.54M15.54 15.54l3.54 3.54"
         />
         <circle cx="12" cy="12" r="4" />
+      </svg>
+    </button>
+    <button
+      class="btn btn-ghost btn-icon"
+      onclick={onOpenCloudSync}
+      aria-label="Cloud Sync"
+      title="Cloud Sync"
+    >
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+      >
+        <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
       </svg>
     </button>
     <button

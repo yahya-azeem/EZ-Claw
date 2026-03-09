@@ -19,7 +19,7 @@
       id: "deepseek",
       name: "DeepSeek",
       icon: "🧠",
-      description: "Free, powerful AI model. Great default choice.",
+      description: "Powerful & affordable AI",
       defaultModel: "deepseek-chat",
       free: true,
       signupUrl: "https://platform.deepseek.com/",
@@ -28,7 +28,7 @@
       id: "openrouter",
       name: "OpenRouter",
       icon: "🌐",
-      description: "Access 100+ models through one API. Free tier available.",
+      description: "100+ models, one API",
       defaultModel: "deepseek/deepseek-chat",
       free: true,
       signupUrl: "https://openrouter.ai/",
@@ -37,8 +37,7 @@
       id: "ollama",
       name: "Ollama",
       icon: "🦙",
-      description:
-        "Run models locally on your machine. Completely free & private.",
+      description: "Local & private",
       defaultModel: "llama3",
       free: true,
       signupUrl: "https://ollama.ai/",
@@ -47,10 +46,28 @@
       id: "openai",
       name: "OpenAI",
       icon: "💚",
-      description: "GPT-4o and more. Paid API.",
+      description: "GPT-4o & more",
       defaultModel: "gpt-4o-mini",
       free: false,
       signupUrl: "https://platform.openai.com/",
+    },
+    {
+      id: "anthropic",
+      name: "Anthropic",
+      icon: "🔮",
+      description: "Claude 3.5 Sonnet",
+      defaultModel: "claude-3-5-sonnet-20241022",
+      free: false,
+      signupUrl: "https://console.anthropic.com/",
+    },
+    {
+      id: "google",
+      name: "Google AI",
+      icon: "✨",
+      description: "Gemini 2.0 Flash",
+      defaultModel: "gemini-2.0-flash",
+      free: true,
+      signupUrl: "https://aistudio.google.com/",
     },
   ];
 
@@ -115,19 +132,26 @@
         <h2>Choose Your AI Provider</h2>
         <p class="step-subtitle">You can change this anytime in Settings</p>
 
-        <div class="provider-grid">
+        <div class="provider-list">
           {#each providers as p (p.id)}
             <button
-              class="provider-card"
+              class="provider-row"
               class:selected={selectedProvider === p.id}
               onclick={() => selectProvider(p.id)}
             >
               <span class="provider-icon">{p.icon}</span>
-              <strong>{p.name}</strong>
-              <p>{p.description}</p>
-              {#if p.free}
-                <span class="badge badge-success">Free</span>
-              {/if}
+              <div class="provider-info">
+                <strong>{p.name}</strong>
+                <span class="provider-desc">{p.description}</span>
+              </div>
+              <div class="provider-badges">
+                {#if p.free}
+                  <span class="badge badge-success">Free</span>
+                {/if}
+                {#if selectedProvider === p.id}
+                  <span class="check-mark">✓</span>
+                {/if}
+              </div>
             </button>
           {/each}
         </div>
@@ -201,7 +225,7 @@
 
 <style>
   .onboarding {
-    max-width: 560px;
+    max-width: 520px;
   }
 
   .onboarding-step {
@@ -276,52 +300,75 @@
     margin-bottom: var(--space-lg);
   }
 
-  .provider-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--space-sm);
+  /* ── Provider Button List ──────────────────────────────── */
+  .provider-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
     margin-bottom: var(--space-lg);
     text-align: left;
   }
 
-  .provider-card {
-    padding: var(--space-md);
+  .provider-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
     background: var(--bg-tertiary);
     border: 2px solid var(--border);
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: all var(--transition);
+    transition: all 0.2s ease;
     font-family: var(--font-sans);
     color: var(--text-primary);
+    width: 100%;
     text-align: left;
   }
 
-  .provider-card:hover {
+  .provider-row:hover {
     border-color: var(--border-active);
+    background: var(--bg-hover);
   }
 
-  .provider-card.selected {
+  .provider-row.selected {
     border-color: var(--accent-primary);
     background: rgba(59, 130, 246, 0.08);
     box-shadow: 0 0 0 1px var(--accent-primary);
   }
 
   .provider-icon {
-    font-size: 28px;
-    display: block;
-    margin-bottom: var(--space-sm);
+    font-size: 24px;
+    flex-shrink: 0;
+    width: 32px;
+    text-align: center;
   }
 
-  .provider-card strong {
-    display: block;
-    margin-bottom: var(--space-xs);
+  .provider-info {
+    flex: 1;
+    min-width: 0;
   }
 
-  .provider-card p {
-    font-size: var(--text-xs);
+  .provider-info strong {
+    display: block;
+    font-size: 14px;
+  }
+
+  .provider-desc {
+    font-size: 12px;
     color: var(--text-secondary);
-    line-height: 1.4;
-    margin-bottom: var(--space-sm);
+  }
+
+  .provider-badges {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .check-mark {
+    color: var(--accent-primary);
+    font-weight: 700;
+    font-size: 16px;
   }
 
   .step-actions {
@@ -350,11 +397,5 @@
     color: var(--text-accent);
     margin-bottom: var(--space-lg);
     text-align: left;
-  }
-
-  @media (max-width: 500px) {
-    .provider-grid {
-      grid-template-columns: 1fr;
-    }
   }
 </style>
