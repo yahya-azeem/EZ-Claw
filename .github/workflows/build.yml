@@ -9,79 +9,126 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  # ── Step 1: Detect what changed ─────────────────────────────────
+  changes:
     runs-on: ubuntu-latest
-    
+    outputs:
+      wasm: ${{ steps.filter.outputs.wasm }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      containers: ${{ steps.filter.outputs.containers }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            wasm:
+              - 'crates/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+            frontend:
+              - 'src/**'
+              - 'index.html'
+              - 'vite.config.ts'
+              - 'tsconfig.json'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'public/**'
+            containers:
+              - 'public/containers/**'
+
+  # ── Step 2: Build ───────────────────────────────────────────────
+  build:
+    needs: changes
+    # Run if anything relevant changed, or on manual dispatch
+    if: >-
+      needs.changes.outputs.wasm == 'true' ||
+      needs.changes.outputs.frontend == 'true' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Show directory structure
-        run: |
-          echo "=== Root ==="
-          ls -la
-          echo "=== crates dir ==="
-          ls -la crates/ || echo "No crates dir"
 
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
+      # ── WASM build (only if crates/ changed) ──────────────────
       - name: Install Rust and wasm32 target
+        if: needs.changes.outputs.wasm == 'true' || github.event_name == 'workflow_dispatch'
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
 
       - name: Cache Cargo registry
-        uses: actions/cache@v3
+        if: needs.changes.outputs.wasm == 'true' || github.event_name == 'workflow_dispatch'
+        uses: actions/cache@v4
         with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-registry-
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Cache Cargo index
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-index-
-
-      - name: Cache target directory
-        uses: actions/cache@v3
+      - name: Cache WASM target
+        if: needs.changes.outputs.wasm == 'true' || github.event_name == 'workflow_dispatch'
+        uses: actions/cache@v4
         with:
           path: crates/ezclaw-core/target
           key: ${{ runner.os }}-wasm-target-${{ hashFiles('crates/ezclaw-core/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-wasm-target-
+          restore-keys: ${{ runner.os }}-wasm-target-
 
       - name: Generate Cargo.lock
+        if: needs.changes.outputs.wasm == 'true' || github.event_name == 'workflow_dispatch'
         run: cd crates/ezclaw-core && cargo generate-lockfile
 
       - name: Install wasm-pack
+        if: needs.changes.outputs.wasm == 'true' || github.event_name == 'workflow_dispatch'
         run: cargo install wasm-pack
 
-      - name: Install dependencies
-        run: npm install
+      - name: Build WASM
+        if: needs.changes.outputs.wasm == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          export RUSTFLAGS="-C target-feature=+bulk-memory"
+          npm run wasm:build 2>&1
+
+      # ── Restore cached WASM pkg (when only frontend changed) ──
+      - name: Cache WASM pkg output
+        uses: actions/cache@v4
+        with:
+          path: pkg
+          key: ${{ runner.os }}-wasm-pkg-${{ hashFiles('crates/**') }}
+          restore-keys: ${{ runner.os }}-wasm-pkg-
+
+      # ── Container blobs ───────────────────────────────────────
+      - name: Cache container blobs
+        uses: actions/cache@v4
+        with:
+          path: containers
+          key: container-blobs-v1
 
       - name: Download WASM containers
         run: |
           mkdir -p containers public/containers
           if [ ! -f "containers/alpine-amd64.wasm" ]; then
+            echo "Downloading Alpine container blob..."
             curl -L "https://raw.githubusercontent.com/ktock/demo-images/main/amd64-vim-wasi-container00.wasm" -o containers/alpine-amd64.wasm
+          else
+            echo "Container blob cached, skipping download"
           fi
           cp containers/*.wasm public/containers/
 
-      - name: Build WASM
-        run: |
-          export RUSTFLAGS="-C target-feature=+bulk-memory"
-          npm run wasm:build 2>&1
+      # ── Frontend build (always runs) ──────────────────────────
+      - name: Install dependencies
+        run: npm install
 
       - name: Build Svelte
         run: npm run build
 
+      # ── Deploy to build branch ────────────────────────────────
       - name: Configure Git
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -111,5 +158,5 @@ jobs:
       - name: Commit and push
         run: |
           git add -A
-          git commit -m "Build: $(date '+%Y-%m-%d %H:%M')" || true
+          git commit -m "Build: $(date '+%Y-%m-%d %H:%M') [wasm=${{ needs.changes.outputs.wasm }}, frontend=${{ needs.changes.outputs.frontend }}]" || true
           git push -f origin build
