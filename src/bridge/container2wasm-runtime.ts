@@ -107,13 +107,15 @@ const ACTIVE_IMAGE_KEY = 'ezclaw:active_container';
  */
 export function getDefaultImages(): ContainerImage[] {
     const arch = detectArch();
+    // Map CPU arch names to Docker-convention filenames
+    const archFile = arch === 'x86_64' ? 'amd64' : arch === 'aarch64' ? 'arm64' : arch;
     return [
         {
             id: 'alpine-default',
             name: 'Alpine Linux',
             os: 'alpine',
             arch,
-            wasmUrl: `/containers/alpine-${arch}.wasm`,
+            wasmUrl: `/containers/alpine-${archFile}.wasm`,
             size: '~60MB',
             description: 'Lightweight Linux with apk package manager. Default container.',
         },
