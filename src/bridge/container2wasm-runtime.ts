@@ -246,8 +246,15 @@ export async function loadContainer(imageId?: string): Promise<void> {
             // Some containers don't have _start — they're command-based
         }
     } catch (err: any) {
-        emit('c2w:error', { error: err.message, image });
-        throw err;
+        // Provide actionable error messages
+        let userMessage = err.message;
+        if (err.message?.includes('404')) {
+            userMessage = `Container blob not found at "${image.wasmUrl}". The container needs to be built first — run the CI pipeline or build locally with: c2w --target-arch=amd64 alpine:3.20 public/containers/alpine-amd64.wasm`;
+        } else if (err.message?.includes('WebAssembly.compile') || err.message?.includes('extends past end')) {
+            userMessage = `Container blob is corrupt or truncated. Delete public/containers/${image.wasmUrl.split('/').pop()} and rebuild it with: c2w --target-arch=amd64 alpine:3.20 public/containers/alpine-amd64.wasm`;
+        }
+        emit('c2w:error', { error: userMessage, image });
+        throw new Error(userMessage);
     }
 }
 

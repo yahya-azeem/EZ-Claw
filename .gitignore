@@ -3,5 +3,6 @@ dist/
 target/
 src/lib/wasm/
 *.swp
+*.wasm
 .DS_Store
 .ironclaw-ref/

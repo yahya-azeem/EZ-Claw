@@ -108,16 +108,25 @@ jobs:
         uses: actions/cache@v4
         with:
           path: containers
-          key: container-blobs-v1
+          key: container-blobs-v2-${{ runner.os }}
 
-      - name: Download WASM containers
+      - name: Build container WASM blobs
         run: |
           mkdir -p containers public/containers
-          if [ ! -f "containers/alpine-amd64.wasm" ]; then
-            echo "Downloading Alpine container blob..."
-            curl -L "https://raw.githubusercontent.com/ktock/demo-images/main/amd64-vim-wasi-container00.wasm" -o containers/alpine-amd64.wasm
+          if [ -f "containers/alpine-amd64.wasm" ] && [ $(stat -c%s "containers/alpine-amd64.wasm") -gt 100000000 ]; then
+            echo "Container blob cached ($(stat -c%s containers/alpine-amd64.wasm) bytes), skipping build"
           else
-            echo "Container blob cached, skipping download"
+            echo "Building Alpine container blob with container2wasm..."
+            # Install container2wasm
+            go install github.com/container2wasm/container2wasm/cmd/c2w@latest 2>/dev/null || {
+              echo "Downloading c2w binary..."
+              curl -sL "https://github.com/container2wasm/container2wasm/releases/download/v0.8.3/c2w-v0.8.3-linux-amd64.tar.gz" | tar xz
+              chmod +x c2w
+              sudo mv c2w /usr/local/bin/
+            }
+            # Build Alpine Linux container → WASM blob
+            c2w --target-arch=amd64 alpine:3.20 containers/alpine-amd64.wasm
+            echo "Built: $(stat -c%s containers/alpine-amd64.wasm) bytes"
           fi
           cp containers/*.wasm public/containers/
 
