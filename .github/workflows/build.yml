@@ -120,9 +120,9 @@ jobs:
             # Install container2wasm
             go install github.com/container2wasm/container2wasm/cmd/c2w@latest 2>/dev/null || {
               echo "Downloading c2w binary..."
-              curl -sL "https://github.com/container2wasm/container2wasm/releases/download/v0.8.3/c2w-v0.8.3-linux-amd64.tar.gz" | tar xz
-              chmod +x c2w
-              sudo mv c2w /usr/local/bin/
+            curl -sL "https://github.com/container2wasm/container2wasm/releases/download/v0.8.3/container2wasm-v0.8.3-linux-amd64.tar.gz" | tar xz
+            chmod +x c2w
+            sudo mv c2w /usr/local/bin/
             }
             # Build Alpine Linux container → WASM blob
             c2w --target-arch=amd64 alpine:3.20 containers/alpine-amd64.wasm
