@@ -296,6 +296,11 @@
           const session: SessionData = {
             id: sessionId,
             title: generateTitle(messages),
+            clawName: "",
+            emoji: "🦀",
+            personaId: null,
+            skillSetId: null,
+            status: "running" as const,
             messages: messages.map((m) => ({
               role: m.role,
               content: m.content,
@@ -513,7 +518,7 @@
     msgs: Array<{ role: string; content: string }>,
   ): string {
     const firstUser = msgs.find((m) => m.role === "user");
-    if (!firstUser) return "New Chat";
+    if (!firstUser) return "New Claw";
     const text = firstUser.content.slice(0, 50);
     return text.length < firstUser.content.length ? text + "..." : text;
   }

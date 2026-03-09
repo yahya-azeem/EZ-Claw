@@ -20,6 +20,16 @@ const SECRETS_STORE = 'secrets';
 export interface SessionData {
     id: string;
     title: string;
+    /** User-chosen display name for this Claw agent */
+    clawName: string;
+    /** Per-claw avatar emoji */
+    emoji: string;
+    /** Bound persona layer ID */
+    personaId: string | null;
+    /** Bound skill set ID */
+    skillSetId: string | null;
+    /** Agent status: running | frozen | killed */
+    status: 'running' | 'frozen' | 'killed';
     messages: Array<{ role: string; content: string }>;
     createdAt: string;
     updatedAt: string;

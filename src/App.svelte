@@ -12,8 +12,16 @@
   import Terminal from "./components/Terminal.svelte";
   import ChannelsPanel from "./components/ChannelsPanel.svelte";
   import PersonaManager from "./components/PersonaManager.svelte";
+  import PanicButton from "./components/PanicButton.svelte";
   import { initWasm, isWasmReady } from "./bridge/wasm-loader";
   import "./bridge/agent-api"; // Expose window.EZClaw headless API
+  import {
+    initOrchestrator,
+    createClaw,
+    cloneClaw,
+    activateClawLayers,
+    killClaw,
+  } from "./bridge/claw-orchestrator";
   import {
     isValidProvider,
     getValidModels,
@@ -129,6 +137,7 @@
     try {
       // Initialize storage first (always available)
       await initStorage();
+      initOrchestrator();
 
       // Try to initialize WASM
       try {
@@ -227,24 +236,37 @@
     }
   });
 
-  function handleNewSession() {
-    const id = crypto.randomUUID();
+  function handleNewClaw(name: string, cloneFromId?: string) {
+    let claw;
+    if (cloneFromId) {
+      claw = cloneClaw(cloneFromId, name, model, provider);
+    }
+    if (!claw) {
+      claw = createClaw(name, model, provider);
+    }
     const session: SessionData = {
-      id,
-      title: "New Chat",
+      id: claw.id,
+      title: name,
+      clawName: claw.clawName,
+      emoji: claw.emoji,
+      personaId: claw.personaId,
+      skillSetId: claw.skillSetId,
+      status: claw.status,
       messages: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      model,
-      provider,
+      createdAt: claw.createdAt,
+      updatedAt: claw.updatedAt,
+      model: claw.model,
+      provider: claw.provider,
     };
     sessions = [session, ...sessions];
-    activeSessionId = id;
+    activeSessionId = claw.id;
+    activateClawLayers(claw.id);
     showSidebar = false;
   }
 
   function handleSelectSession(id: string) {
     activeSessionId = id;
+    activateClawLayers(id);
     showSidebar = false;
   }
 
@@ -275,7 +297,7 @@
     showOnboarding = false;
 
     if (sessions.length === 0) {
-      handleNewSession();
+      handleNewClaw("My First Claw");
     }
   }
 </script>
@@ -315,7 +337,7 @@
       {sessions}
       {activeSessionId}
       isOpen={showSidebar}
-      onNewSession={handleNewSession}
+      onNewClaw={handleNewClaw}
       onSelectSession={handleSelectSession}
       onDeleteSession={handleDeleteSession}
       onClose={() => (showSidebar = false)}
@@ -337,6 +359,26 @@
         onOpenTerminal={() => (showTerminal = true)}
         onOpenChannels={() => (showChannels = true)}
         onOpenPersonas={() => (showPersonas = true)}
+      />
+      <PanicButton
+        activeClawId={activeSessionId}
+        onPanic={() => {
+          sessions = sessions.map((s) => ({ ...s, status: "frozen" as const }));
+        }}
+        onResume={() => {
+          sessions = sessions.map((s) =>
+            s.status === "frozen" ? { ...s, status: "running" as const } : s,
+          );
+        }}
+        onKill={(id) => {
+          sessions = sessions.map((s) =>
+            s.id === id ? { ...s, status: "killed" as const } : s,
+          );
+          if (activeSessionId === id) {
+            const next = sessions.find((s) => s.status === "running");
+            activeSessionId = next ? next.id : null;
+          }
+        }}
       />
 
       <Chat
