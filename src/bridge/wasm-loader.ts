@@ -99,11 +99,15 @@ interface EzClawWasm {
     // Crypto
     encrypt(plaintext: string, passphrase: string): string;
     decrypt(hex_data: string, passphrase: string): string;
+    decrypt_credential(credential_id: string): string;
 
     // Text
     wasm_estimate_tokens(text: string): number;
     strip_markdown(text: string): string;
     truncate_to_tokens(text: string, max_tokens: number): string;
+
+    // Dynamic Tools
+    register_dynamic_tool(name: string, description: string, code: string): string;
 }
 
 interface WasmConfigInstance {

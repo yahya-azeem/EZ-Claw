@@ -177,17 +177,7 @@
                                 >
                                     <span class="tier-icon">🌐</span> WASI
                                     <span class="tier-desc"
-                                        >Basic (all platforms)</span
-                                    >
-                                </button>
-                                <button
-                                    class="tier-option"
-                                    class:active={currentTier === "cheerpx"}
-                                    onclick={() => changeTier("cheerpx")}
-                                >
-                                    <span class="tier-icon">🐧</span> CheerpX
-                                    <span class="tier-desc"
-                                        >Full Linux (desktop)</span
+                                        >BusyBox shell (all platforms)</span
                                     >
                                 </button>
                                 <button

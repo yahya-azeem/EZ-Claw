@@ -226,47 +226,398 @@ export class WASIContainer {
         }
     }
 
+    // ── In-memory virtual filesystem for fallback shell ──
+    private vfs: Map<string, { content: string; isDir: boolean; mtime: number }> = new Map([
+        ['/', { content: '', isDir: true, mtime: Date.now() }],
+        ['/workspace', { content: '', isDir: true, mtime: Date.now() }],
+        ['/tmp', { content: '', isDir: true, mtime: Date.now() }],
+        ['/home', { content: '', isDir: true, mtime: Date.now() }],
+        ['/home/ezclaw', { content: '', isDir: true, mtime: Date.now() }],
+    ]);
+    private cwd: string = '/workspace';
+    private shellVars: Map<string, string> = new Map([
+        ['HOME', '/home/ezclaw'],
+        ['USER', 'ezclaw'],
+        ['SHELL', '/bin/sh'],
+    ]);
+
+    private normalizePath(p: string): string {
+        if (!p.startsWith('/')) p = this.cwd + '/' + p;
+        const parts = p.split('/').filter(Boolean);
+        const stack: string[] = [];
+        for (const part of parts) {
+            if (part === '..') stack.pop();
+            else if (part !== '.') stack.push(part);
+        }
+        return '/' + stack.join('/');
+    }
+
     private fallbackExecute(cmd: string, args: string[]): CommandResult {
+        // Handle pipes
+        const fullCmd = [cmd, ...args].join(' ');
+        if (fullCmd.includes(' | ')) {
+            return this.executePipeline(fullCmd);
+        }
+
+        // Handle output redirection
+        let redirectFile: string | null = null;
+        let appendMode = false;
+        const filteredArgs: string[] = [];
+        for (let i = 0; i < args.length; i++) {
+            if (args[i] === '>>' && i + 1 < args.length) {
+                redirectFile = args[i + 1]; appendMode = true; i++; continue;
+            }
+            if (args[i] === '>' && i + 1 < args.length) {
+                redirectFile = args[i + 1]; appendMode = false; i++; continue;
+            }
+            if (args[i].startsWith('>>')) {
+                redirectFile = args[i].slice(2); appendMode = true; continue;
+            }
+            if (args[i].startsWith('>')) {
+                redirectFile = args[i].slice(1); appendMode = false; continue;
+            }
+            filteredArgs.push(args[i]);
+        }
+
+        const result = this.executeCommand(cmd, filteredArgs);
+
+        // Apply redirection
+        if (redirectFile && result.exit_code === 0) {
+            const path = this.normalizePath(redirectFile);
+            const existing = this.vfs.get(path);
+            if (appendMode && existing && !existing.isDir) {
+                existing.content += result.stdout;
+                existing.mtime = Date.now();
+            } else {
+                this.vfs.set(path, { content: result.stdout, isDir: false, mtime: Date.now() });
+            }
+            result.stdout = '';
+        }
+
+        return result;
+    }
+
+    private executePipeline(fullCmd: string): CommandResult {
+        const commands = fullCmd.split(' | ').map(s => s.trim());
+        let input = '';
+        let lastResult: CommandResult = { stdout: '', stderr: '', exit_code: 0 };
+        for (const cmdStr of commands) {
+            const parts = cmdStr.split(/\s+/);
+            const c = parts[0];
+            const a = parts.slice(1);
+            this.stdinBuffer = input;
+            lastResult = this.executeCommand(c, a);
+            input = lastResult.stdout;
+        }
+        return lastResult;
+    }
+
+    private executeCommand(cmd: string, args: string[]): CommandResult {
         let stdout = '';
         let stderr = '';
         let exitCode = 0;
 
         switch (cmd) {
-            case 'ls':
-                stdout = this.listMountedDirs();
+            case 'ls': {
+                const target = args.length > 0 ? this.normalizePath(args[args.length - 1]) : this.cwd;
+                const showAll = args.includes('-a') || args.includes('-la') || args.includes('-al');
+                const longForm = args.includes('-l') || args.includes('-la') || args.includes('-al');
+                const dirEntry = this.vfs.get(target);
+                if (!dirEntry || !dirEntry.isDir) {
+                    // Check if it's a file
+                    if (dirEntry) {
+                        stdout = longForm
+                            ? `-rw-r--r--   1 ezclaw ezclaw  ${dirEntry.content.length} ${target.split('/').pop()}\n`
+                            : `${target.split('/').pop()}\n`;
+                    } else {
+                        stderr = `ls: cannot access '${target}': No such file or directory\n`;
+                        exitCode = 2;
+                    }
+                    break;
+                }
+                const entries: string[] = [];
+                if (showAll) entries.push('.', '..');
+                for (const [path, entry] of this.vfs) {
+                    if (path === target) continue;
+                    const parent = path.substring(0, path.lastIndexOf('/')) || '/';
+                    if (parent === target) {
+                        const name = path.split('/').pop()!;
+                        if (!showAll && name.startsWith('.')) continue;
+                        if (longForm) {
+                            const perm = entry.isDir ? 'drwxr-xr-x' : '-rw-r--r--';
+                            const size = entry.isDir ? 4096 : entry.content.length;
+                            entries.push(`${perm}   1 ezclaw ezclaw  ${String(size).padStart(5)} ${name}`);
+                        } else {
+                            entries.push(name);
+                        }
+                    }
+                }
+                // Also show mount points
+                for (const [mountPath] of this.mounts) {
+                    const parent = mountPath.substring(0, mountPath.lastIndexOf('/')) || '/';
+                    if (parent === target) {
+                        const name = mountPath.split('/').pop()!;
+                        if (longForm) {
+                            entries.push(`drwxr-xr-x   1 ezclaw ezclaw   4096 ${name} [mount]`);
+                        } else {
+                            entries.push(name);
+                        }
+                    }
+                }
+                stdout = entries.join('\n') + (entries.length > 0 ? '\n' : '');
                 break;
+            }
             case 'pwd':
-                stdout = '/workspace\n';
+                stdout = this.cwd + '\n';
                 break;
-            case 'echo':
-                stdout = args.join(' ') + '\n';
+            case 'cd': {
+                const target = args.length > 0 ? this.normalizePath(args[0]) : '/home/ezclaw';
+                const entry = this.vfs.get(target);
+                if (entry && entry.isDir) {
+                    this.cwd = target;
+                } else {
+                    stderr = `cd: ${args[0]}: No such directory\n`;
+                    exitCode = 1;
+                }
                 break;
+            }
+            case 'echo': {
+                // Expand $VAR references
+                const text = args.map(a => {
+                    return a.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_, name) => {
+                        return this.shellVars.get(name) || WASI_ENV_VARS.find(e => e.startsWith(name + '='))?.split('=')[1] || '';
+                    });
+                }).join(' ');
+                stdout = text + '\n';
+                break;
+            }
+            case 'cat': {
+                if (args.length === 0) {
+                    stderr = 'cat: missing operand\n';
+                    exitCode = 1;
+                    break;
+                }
+                for (const arg of args) {
+                    const path = this.normalizePath(arg);
+                    const entry = this.vfs.get(path);
+                    if (entry && !entry.isDir) {
+                        stdout += entry.content;
+                    } else if (entry && entry.isDir) {
+                        stderr += `cat: ${arg}: Is a directory\n`;
+                        exitCode = 1;
+                    } else {
+                        stderr += `cat: ${arg}: No such file or directory\n`;
+                        exitCode = 1;
+                    }
+                }
+                break;
+            }
+            case 'mkdir': {
+                const parents = args.includes('-p');
+                const paths = args.filter(a => !a.startsWith('-'));
+                for (const p of paths) {
+                    const path = this.normalizePath(p);
+                    if (this.vfs.has(path)) {
+                        if (!parents) { stderr += `mkdir: cannot create directory '${p}': File exists\n`; exitCode = 1; }
+                        continue;
+                    }
+                    if (parents) {
+                        // Create all parent dirs
+                        const parts = path.split('/').filter(Boolean);
+                        let current = '';
+                        for (const part of parts) {
+                            current += '/' + part;
+                            if (!this.vfs.has(current)) {
+                                this.vfs.set(current, { content: '', isDir: true, mtime: Date.now() });
+                            }
+                        }
+                    } else {
+                        const parentPath = path.substring(0, path.lastIndexOf('/')) || '/';
+                        if (!this.vfs.has(parentPath)) {
+                            stderr += `mkdir: cannot create directory '${p}': No such file or directory\n`;
+                            exitCode = 1;
+                            continue;
+                        }
+                        this.vfs.set(path, { content: '', isDir: true, mtime: Date.now() });
+                    }
+                }
+                break;
+            }
+            case 'touch': {
+                for (const arg of args.filter(a => !a.startsWith('-'))) {
+                    const path = this.normalizePath(arg);
+                    const existing = this.vfs.get(path);
+                    if (existing) {
+                        existing.mtime = Date.now();
+                    } else {
+                        this.vfs.set(path, { content: '', isDir: false, mtime: Date.now() });
+                    }
+                }
+                break;
+            }
+            case 'rm': {
+                const recursive = args.includes('-r') || args.includes('-rf') || args.includes('-fr');
+                const force = args.includes('-f') || args.includes('-rf') || args.includes('-fr');
+                const paths = args.filter(a => !a.startsWith('-'));
+                for (const p of paths) {
+                    const path = this.normalizePath(p);
+                    const entry = this.vfs.get(path);
+                    if (!entry) {
+                        if (!force) { stderr += `rm: cannot remove '${p}': No such file or directory\n`; exitCode = 1; }
+                        continue;
+                    }
+                    if (entry.isDir && !recursive) {
+                        stderr += `rm: cannot remove '${p}': Is a directory\n`;
+                        exitCode = 1;
+                        continue;
+                    }
+                    // Remove entry and all children
+                    const toDelete = [...this.vfs.keys()].filter(k => k === path || k.startsWith(path + '/'));
+                    for (const k of toDelete) this.vfs.delete(k);
+                }
+                break;
+            }
+            case 'cp': {
+                const filteredPaths = args.filter(a => !a.startsWith('-'));
+                if (filteredPaths.length < 2) {
+                    stderr = 'cp: missing operand\n'; exitCode = 1; break;
+                }
+                const src = this.normalizePath(filteredPaths[0]);
+                const dst = this.normalizePath(filteredPaths[1]);
+                const srcEntry = this.vfs.get(src);
+                if (!srcEntry || srcEntry.isDir) {
+                    stderr = `cp: cannot copy '${filteredPaths[0]}': ${srcEntry ? 'Is a directory' : 'No such file'}\n`;
+                    exitCode = 1; break;
+                }
+                this.vfs.set(dst, { content: srcEntry.content, isDir: false, mtime: Date.now() });
+                break;
+            }
+            case 'mv': {
+                const filteredPaths = args.filter(a => !a.startsWith('-'));
+                if (filteredPaths.length < 2) {
+                    stderr = 'mv: missing operand\n'; exitCode = 1; break;
+                }
+                const src = this.normalizePath(filteredPaths[0]);
+                const dst = this.normalizePath(filteredPaths[1]);
+                const srcEntry = this.vfs.get(src);
+                if (!srcEntry) {
+                    stderr = `mv: cannot stat '${filteredPaths[0]}': No such file or directory\n`;
+                    exitCode = 1; break;
+                }
+                this.vfs.set(dst, { ...srcEntry, mtime: Date.now() });
+                this.vfs.delete(src);
+                break;
+            }
+            case 'head': {
+                const nLines = args.includes('-n') ? parseInt(args[args.indexOf('-n') + 1]) || 10 : 10;
+                const file = args.filter(a => !a.startsWith('-') && a !== String(nLines))[0];
+                if (!file) { stderr = 'head: missing operand\n'; exitCode = 1; break; }
+                const path = this.normalizePath(file);
+                const entry = this.vfs.get(path);
+                if (!entry || entry.isDir) { stderr = `head: ${file}: ${entry ? 'Is a directory' : 'No such file'}\n`; exitCode = 1; break; }
+                stdout = entry.content.split('\n').slice(0, nLines).join('\n') + '\n';
+                break;
+            }
+            case 'tail': {
+                const nLines = args.includes('-n') ? parseInt(args[args.indexOf('-n') + 1]) || 10 : 10;
+                const file = args.filter(a => !a.startsWith('-') && a !== String(nLines))[0];
+                if (!file) { stderr = 'tail: missing operand\n'; exitCode = 1; break; }
+                const path = this.normalizePath(file);
+                const entry = this.vfs.get(path);
+                if (!entry || entry.isDir) { stderr = `tail: ${file}: ${entry ? 'Is a directory' : 'No such file'}\n`; exitCode = 1; break; }
+                const lines = entry.content.split('\n');
+                stdout = lines.slice(-nLines).join('\n') + '\n';
+                break;
+            }
+            case 'wc': {
+                const file = args.filter(a => !a.startsWith('-'))[0];
+                if (!file) { stderr = 'wc: missing operand\n'; exitCode = 1; break; }
+                const path = this.normalizePath(file);
+                const entry = this.vfs.get(path);
+                if (!entry || entry.isDir) { stderr = `wc: ${file}: ${entry ? 'Is a directory' : 'No such file'}\n`; exitCode = 1; break; }
+                const lines = entry.content.split('\n').length;
+                const words = entry.content.split(/\s+/).filter(Boolean).length;
+                const bytes = entry.content.length;
+                stdout = `  ${lines}  ${words} ${bytes} ${file}\n`;
+                break;
+            }
+            case 'grep': {
+                if (args.length < 2) { stderr = 'grep: missing operand\n'; exitCode = 1; break; }
+                const caseInsensitive = args.includes('-i');
+                const filteredArgs = args.filter(a => !a.startsWith('-'));
+                const pattern = filteredArgs[0];
+                const file = filteredArgs[1];
+                const path = this.normalizePath(file);
+                const entry = this.vfs.get(path);
+                if (!entry || entry.isDir) { stderr = `grep: ${file}: ${entry ? 'Is a directory' : 'No such file'}\n`; exitCode = 1; break; }
+                const regex = new RegExp(pattern, caseInsensitive ? 'i' : '');
+                const matched = entry.content.split('\n').filter(line => regex.test(line));
+                if (matched.length === 0) { exitCode = 1; break; }
+                stdout = matched.join('\n') + '\n';
+                break;
+            }
+            case 'sort': {
+                const file = args.filter(a => !a.startsWith('-'))[0];
+                if (!file) { stderr = 'sort: missing operand\n'; exitCode = 1; break; }
+                const path = this.normalizePath(file);
+                const entry = this.vfs.get(path);
+                if (!entry || entry.isDir) { stderr = `sort: ${file}: ${entry ? 'Is a directory' : 'No such file'}\n`; exitCode = 1; break; }
+                const lines = entry.content.split('\n').filter(Boolean);
+                const reverse = args.includes('-r');
+                const numeric = args.includes('-n');
+                lines.sort((a, b) => numeric ? parseFloat(a) - parseFloat(b) : a.localeCompare(b));
+                if (reverse) lines.reverse();
+                stdout = lines.join('\n') + '\n';
+                break;
+            }
+            case 'find': {
+                const startDir = args.length > 0 && !args[0].startsWith('-') ? this.normalizePath(args[0]) : this.cwd;
+                const nameIdx = args.indexOf('-name');
+                const pattern = nameIdx >= 0 && nameIdx + 1 < args.length ? args[nameIdx + 1] : null;
+                const results: string[] = [];
+                for (const [path] of this.vfs) {
+                    if (!path.startsWith(startDir)) continue;
+                    if (pattern) {
+                        const name = path.split('/').pop()!;
+                        const regex = new RegExp('^' + pattern.replace(/\*/g, '.*').replace(/\?/g, '.') + '$');
+                        if (!regex.test(name)) continue;
+                    }
+                    results.push(path);
+                }
+                stdout = results.join('\n') + (results.length > 0 ? '\n' : '');
+                break;
+            }
             case 'whoami':
                 stdout = 'ezclaw\n';
                 break;
-            case 'uname':
-                stdout = `EZ-Claw WASI ${this.osInfo}\n`;
+            case 'uname': {
+                if (args.includes('-a')) {
+                    stdout = `EZ-Claw WASI ${this.osInfo} x86_64 ezclaw-wasi\n`;
+                } else {
+                    stdout = `EZ-Claw WASI ${this.osInfo}\n`;
+                }
                 break;
+            }
             case 'date':
                 stdout = new Date().toISOString() + '\n';
                 break;
             case 'env':
-                stdout = 'HOME=/\nUSER=ezclaw\nPATH=/usr/local/bin:/usr/bin:/bin\nPWD=/workspace\nTERM=xterm-256color\n';
-                break;
-            case 'cat':
-                if (args.length === 0) {
-                    stderr = 'cat: missing operand\n';
-                    exitCode = 1;
-                } else {
-                    stdout = `[Use read_file tool for workspace files: ${args[0]}]\n`;
+                stdout = WASI_ENV_VARS.join('\n') + '\n';
+                for (const [k, v] of this.shellVars) {
+                    stdout += `${k}=${v}\n`;
                 }
                 break;
-            case 'sh':
-            case 'bash':
-                stdout = args.join(' ') + '\n';
+            case 'export': {
+                for (const arg of args) {
+                    const eq = arg.indexOf('=');
+                    if (eq > 0) {
+                        this.shellVars.set(arg.slice(0, eq), arg.slice(eq + 1));
+                    }
+                }
                 break;
+            }
             case 'id':
-                stdout = 'uid=0(root) gid=0(root) groups=0(root)\n';
+                stdout = 'uid=1000(ezclaw) gid=1000(ezclaw) groups=1000(ezclaw)\n';
                 break;
             case 'hostname':
                 stdout = 'ezclaw-wasi\n';
@@ -274,6 +625,75 @@ export class WASIContainer {
             case 'arch':
                 stdout = 'x86_64\n';
                 break;
+            case 'true':
+                exitCode = 0;
+                break;
+            case 'false':
+                exitCode = 1;
+                break;
+            case 'sleep': {
+                // Non-blocking "sleep" — just acknowledges the duration
+                const duration = parseFloat(args[0] || '0');
+                if (isNaN(duration)) { stderr = `sleep: invalid time interval '${args[0]}'\n`; exitCode = 1; }
+                break;
+            }
+            case 'printf': {
+                if (args.length === 0) break;
+                const fmt = args[0];
+                const fmtArgs = args.slice(1);
+                let result = fmt;
+                let argIdx = 0;
+                result = result.replace(/%s/g, () => fmtArgs[argIdx++] || '');
+                result = result.replace(/%d/g, () => String(parseInt(fmtArgs[argIdx++] || '0')));
+                result = result.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+                stdout = result;
+                break;
+            }
+            case 'test':
+            case '[': {
+                const testArgs = cmd === '[' ? args.filter(a => a !== ']') : args;
+                exitCode = this.evaluateTest(testArgs) ? 0 : 1;
+                break;
+            }
+            case 'expr': {
+                try {
+                    const a = parseInt(args[0]);
+                    const op = args[1];
+                    const b = parseInt(args[2]);
+                    if (op === '+') stdout = String(a + b) + '\n';
+                    else if (op === '-') stdout = String(a - b) + '\n';
+                    else if (op === '*') stdout = String(a * b) + '\n';
+                    else if (op === '/') stdout = String(Math.floor(a / b)) + '\n';
+                    else if (op === '%') stdout = String(a % b) + '\n';
+                    else { stderr = `expr: unknown operator '${op}'\n`; exitCode = 2; }
+                } catch {
+                    stderr = 'expr: syntax error\n'; exitCode = 2;
+                }
+                break;
+            }
+            case 'seq': {
+                const nums = args.map(Number);
+                let start = 1, step = 1, end = 1;
+                if (nums.length === 1) { end = nums[0]; }
+                else if (nums.length === 2) { start = nums[0]; end = nums[1]; }
+                else if (nums.length >= 3) { start = nums[0]; step = nums[1]; end = nums[2]; }
+                const lines: string[] = [];
+                for (let i = start; step > 0 ? i <= end : i >= end; i += step) {
+                    lines.push(String(i));
+                }
+                stdout = lines.join('\n') + '\n';
+                break;
+            }
+            case 'sh':
+            case 'bash': {
+                if (args.includes('-c') && args.length > args.indexOf('-c') + 1) {
+                    const subCmd = args.slice(args.indexOf('-c') + 1).join(' ');
+                    const parts = subCmd.split(/\s+/);
+                    return this.fallbackExecute(parts[0], parts.slice(1));
+                }
+                stdout = `sh: interactive mode not supported in WASI sandbox\n`;
+                break;
+            }
             case 'help':
                 stdout = this.getHelp();
                 break;
@@ -285,25 +705,36 @@ export class WASIContainer {
         return { stdout, stderr, exit_code: exitCode };
     }
 
-    private listMountedDirs(): string {
-        if (this.mounts.size === 0) {
-            return 'drwxr-xr-x   1 ezclaw ezclaw  4096 .\n';
+    private evaluateTest(args: string[]): boolean {
+        if (args.length === 0) return false;
+        if (args.length === 1) return args[0] !== '';
+        if (args[0] === '-f') return this.vfs.has(this.normalizePath(args[1])) && !this.vfs.get(this.normalizePath(args[1]))!.isDir;
+        if (args[0] === '-d') return this.vfs.has(this.normalizePath(args[1])) && this.vfs.get(this.normalizePath(args[1]))!.isDir;
+        if (args[0] === '-e') return this.vfs.has(this.normalizePath(args[1]));
+        if (args[0] === '-z') return args[1] === '';
+        if (args[0] === '-n') return args[1] !== '';
+        if (args.length === 3) {
+            if (args[1] === '=') return args[0] === args[2];
+            if (args[1] === '!=') return args[0] !== args[2];
+            if (args[1] === '-eq') return parseInt(args[0]) === parseInt(args[2]);
+            if (args[1] === '-ne') return parseInt(args[0]) !== parseInt(args[2]);
+            if (args[1] === '-gt') return parseInt(args[0]) > parseInt(args[2]);
+            if (args[1] === '-lt') return parseInt(args[0]) < parseInt(args[2]);
         }
-        let output = 'drwxr-xr-x   1 ezclaw ezclaw  4096 .\ndrwxr-xr-x   1 ezclaw ezclaw  4096 ..\n';
-        for (const [path] of this.mounts) {
-            output += `drwxr-xr-x   1 ezclaw ezclaw  4096 ${path}\n`;
-        }
-        return output;
+        return false;
     }
 
     private getHelp(): string {
-        return `EZ-Claw WASI Container - Available Commands:
-  ls, pwd, echo, whoami, uname, date, env, cat, id, hostname, arch, help
+        return `EZ-Claw WASI Container - BusyBox Shell
+  File:    ls, cat, head, tail, cp, mv, rm, mkdir, touch, find, wc
+  Text:    echo, printf, grep, sort
+  System:  pwd, cd, whoami, uname, date, env, export, id, hostname, arch
+  Math:    expr, seq, test
+  Control: true, false, sleep, sh -c
+  I/O:     > (redirect), >> (append), | (pipe)
 
-  Workspace tools (use instead of shell):
-    read_file, write_file, list_dir
-
-  For full shell access, use CheerpX or Native CLI tier.
+  Agent workspace tools: read_file, write_file, list_dir
+  For full host shell access, use the Native CLI tier.
 `;
     }
 

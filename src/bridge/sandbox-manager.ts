@@ -1,12 +1,11 @@
 /**
- * Sandbox Manager — Three-tier sandboxed shell execution.
+ * Sandbox Manager — Two-tier sandboxed shell execution.
  *
  * Adapted from IronClaw's SandboxPolicy for browser environments:
  *
  * | Tier        | Filesystem       | Network            | Platform           |
- * |-------------|-----------------|--------------------|--------------------|
+ * |-------------|-----------------|--------------------|--------------------|  
  * | WASI        | OPFS workspace  | Proxied+allowlist  | All (iPhone safe)  |
- * | CheerpX     | In-VM ext4      | Full (in-VM)       | Desktop only       |
  * | Native CLI  | Real host FS    | Full               | Requires companion |
  *
  * All tiers go through the WASM security pipeline before execution.
@@ -14,7 +13,7 @@
 
 import { WASIContainer, detectArchitecture, type CommandResult } from './wasi-container';
 
-export type SandboxTier = 'wasi' | 'cheerpx' | 'native';
+export type SandboxTier = 'wasi' | 'native';
 
 export interface SandboxConfig {
     tier: SandboxTier;
@@ -36,6 +35,14 @@ export interface ShellResult {
     durationMs: number;
     timedOut: boolean;
     truncated: boolean;
+}
+
+export interface AuditEntry {
+    id: string;
+    command: string;
+    tier: SandboxTier;
+    result: ShellResult;
+    timestamp: string;
 }
 
 const DEFAULT_CONFIG: SandboxConfig = {
@@ -63,11 +70,11 @@ class WasiSandbox {
 
     private async getContainer(): Promise<WASIContainer> {
         if (this.container) return this.container;
-        
+
         if (!this.containerPromise) {
             this.containerPromise = this.initContainer();
         }
-        
+
         this.container = await this.containerPromise;
         return this.container;
     }
@@ -75,7 +82,7 @@ class WasiSandbox {
     private async initContainer(): Promise<WASIContainer> {
         const arch = await detectArchitecture();
         const container = new WASIContainer();
-        
+
         try {
             const wasmPath = `/containers/alpine-${arch}.wasm`;
             const loadedContainer = await WASIContainer.load(wasmPath);
@@ -89,13 +96,35 @@ class WasiSandbox {
         }
     }
 
-    async execute(command: string): Promise<ShellResult> {
+    async execute(command: string, timeoutMs: number): Promise<ShellResult> {
         const start = performance.now();
 
         try {
             const container = await this.getContainer();
-            const result: CommandResult = await container.run(command);
-            
+
+            // Enforce timeout
+            const resultPromise = container.run(command);
+            const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)
+            );
+
+            let result: CommandResult;
+            try {
+                result = await Promise.race([resultPromise, timeoutPromise]);
+            } catch (e: any) {
+                if (e.message === 'TIMEOUT') {
+                    return {
+                        exitCode: 124,
+                        stdout: '',
+                        stderr: `Command timed out after ${timeoutMs}ms`,
+                        durationMs: timeoutMs,
+                        timedOut: true,
+                        truncated: false,
+                    };
+                }
+                throw e;
+            }
+
             return {
                 exitCode: result.exit_code,
                 stdout: result.stdout.slice(0, this.config.maxOutputBytes),
@@ -123,71 +152,6 @@ class WasiSandbox {
 
     getContainerInfo() {
         return this.container?.getInfo();
-    }
-}
-
-// ── CheerpX Sandbox (Desktop only — full Linux VM in browser) ─────
-
-/**
- * CheerpX provides a full x86 Linux environment in the browser.
- * No JIT on iOS, so desktop only.
- */
-class CheerpXSandbox {
-    private config: SandboxConfig;
-    private vm: any = null;
-
-    constructor(config: SandboxConfig) {
-        this.config = config;
-    }
-
-    async initialize(): Promise<void> {
-        try {
-            // Load CheerpX runtime (would be loaded from CDN)
-            // const CheerpX = await import('https://cxrtnc.leaningtech.com/1.0.6/cx.esm.js');
-            // this.vm = await CheerpX.Linux.create({ mounts: [...] });
-            console.log('[EZ-Claw] CheerpX sandbox initialized (placeholder)');
-        } catch (err) {
-            console.error('[EZ-Claw] CheerpX not available:', err);
-            throw new Error('CheerpX not available on this platform');
-        }
-    }
-
-    async execute(command: string): Promise<ShellResult> {
-        const start = performance.now();
-
-        if (!this.vm) {
-            return {
-                exitCode: 1,
-                stdout: '',
-                stderr: 'CheerpX VM not initialized. Run initialize() first.\n' +
-                    'Note: CheerpX requires desktop browser (no iOS JIT support).\n',
-                durationMs: performance.now() - start,
-                timedOut: false,
-                truncated: false,
-            };
-        }
-
-        // Execute in CheerpX VM
-        try {
-            // this.vm.run(command) would be the real call
-            return {
-                exitCode: 0,
-                stdout: `[CheerpX] Would execute: ${command}\n`,
-                stderr: '',
-                durationMs: performance.now() - start,
-                timedOut: false,
-                truncated: false,
-            };
-        } catch (err: any) {
-            return {
-                exitCode: 1,
-                stdout: '',
-                stderr: err.message,
-                durationMs: performance.now() - start,
-                timedOut: false,
-                truncated: false,
-            };
-        }
     }
 }
 
@@ -238,7 +202,7 @@ class NativeCLISandbox {
                             truncated: (data.stdout || '').length > this.config.maxOutputBytes,
                         });
                     }
-                } catch { /* ignore */ }
+                } catch { /* ignore malformed messages */ }
             };
 
             this.ws.onclose = () => {
@@ -314,14 +278,14 @@ class NativeCLISandbox {
 export class SandboxManager {
     private config: SandboxConfig;
     private wasi: WasiSandbox;
-    private cheerpx: CheerpXSandbox;
     private native: NativeCLISandbox;
     private outputListeners: ((line: string) => void)[] = [];
+    private commandHistory: AuditEntry[] = [];
+    private readonly MAX_HISTORY = 500;
 
     constructor(config: Partial<SandboxConfig> = {}) {
         this.config = { ...DEFAULT_CONFIG, ...config };
         this.wasi = new WasiSandbox(this.config);
-        this.cheerpx = new CheerpXSandbox(this.config);
         this.native = new NativeCLISandbox(this.config);
     }
 
@@ -340,11 +304,16 @@ export class SandboxManager {
         this.outputListeners.push(listener);
     }
 
+    /** Remove an output listener. */
+    offOutput(listener: (line: string) => void): void {
+        this.outputListeners = this.outputListeners.filter(l => l !== listener);
+    }
+
     private emit(line: string): void {
         for (const l of this.outputListeners) l(line);
     }
 
-    /** Execute a command through the active sandbox tier. */
+    /** Execute a command through the active sandbox tier with timeout enforcement. */
     async execute(command: string): Promise<ShellResult> {
         this.emit(`$ ${command}\n`);
 
@@ -352,21 +321,55 @@ export class SandboxManager {
 
         switch (this.config.tier) {
             case 'wasi':
-                result = await this.wasi.execute(command);
-                break;
-            case 'cheerpx':
-                result = await this.cheerpx.execute(command);
+                result = await this.wasi.execute(command, this.config.timeoutMs);
                 break;
             case 'native':
                 result = await this.native.execute(command);
                 break;
+            default:
+                result = {
+                    exitCode: 1,
+                    stdout: '',
+                    stderr: `Unknown sandbox tier: ${this.config.tier}`,
+                    durationMs: 0,
+                    timedOut: false,
+                    truncated: false,
+                };
         }
 
         // Emit output to terminal listeners
         if (result.stdout) this.emit(result.stdout);
         if (result.stderr) this.emit(`\x1b[31m${result.stderr}\x1b[0m`); // Red for stderr
 
+        // Record in audit log
+        this.recordAudit(command, result);
+
         return result;
+    }
+
+    /** Record a command execution in the audit log. */
+    private recordAudit(command: string, result: ShellResult): void {
+        const entry: AuditEntry = {
+            id: crypto.randomUUID(),
+            command,
+            tier: this.config.tier,
+            result,
+            timestamp: new Date().toISOString(),
+        };
+        this.commandHistory.push(entry);
+        if (this.commandHistory.length > this.MAX_HISTORY) {
+            this.commandHistory = this.commandHistory.slice(-this.MAX_HISTORY);
+        }
+    }
+
+    /** Get command execution history (audit log). */
+    getHistory(): AuditEntry[] {
+        return [...this.commandHistory];
+    }
+
+    /** Clear command history. */
+    clearHistory(): void {
+        this.commandHistory = [];
     }
 
     /** Connect native CLI companion. */
@@ -385,34 +388,27 @@ export class SandboxManager {
         return this.native.isConnected;
     }
 
-    /** Initialize CheerpX VM. */
-    async initCheerpX(): Promise<void> {
-        await this.cheerpx.initialize();
-    }
-
     /** Get sandbox status info. */
     getStatus(): { tier: SandboxTier; available: boolean; info: string } {
         switch (this.config.tier) {
             case 'wasi':
-                return { tier: 'wasi', available: true, info: 'WASI sandbox (basic commands)' };
-            case 'cheerpx':
-                return { tier: 'cheerpx', available: false, info: 'CheerpX (desktop only, requires init)' };
+                return { tier: 'wasi', available: true, info: 'WASI sandbox (BusyBox shell + OPFS workspace)' };
             case 'native':
                 return { tier: 'native', available: this.native.isConnected, info: this.native.isConnected ? 'Connected to companion' : 'Not connected' };
+            default:
+                return { tier: this.config.tier, available: false, info: 'Unknown tier' };
         }
     }
 
     /** Mount workspace directory to WASI container. */
     async mountWorkspace(handle: FileSystemDirectoryHandle): Promise<void> {
-        if (this.config.tier === 'wasi') {
-            await (this.wasi as any).mountWorkspace(handle);
-        }
+        await this.wasi.mountWorkspace(handle);
     }
 
     /** Get container info for WASI tier. */
     getContainerInfo(): any {
         if (this.config.tier === 'wasi') {
-            return (this.wasi as any).getContainerInfo?.();
+            return this.wasi.getContainerInfo();
         }
         return null;
     }

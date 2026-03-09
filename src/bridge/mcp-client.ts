@@ -326,9 +326,22 @@ export class MCPConnection {
  * Manages multiple MCP server connections.
  */
 export class MCPManager {
+    private static instance: MCPManager | null = null;
     private connections = new Map<string, MCPConnection>();
     private configs: MCPServerConfig[] = [];
 
+    /** Get or create the singleton MCPManager instance. */
+    static getInstance(): MCPManager {
+        if (!MCPManager.instance) {
+            MCPManager.instance = new MCPManager();
+        }
+        return MCPManager.instance;
+    }
+
+    /** Get a connection by server ID. */
+    getConnection(id: string): MCPConnection | undefined {
+        return this.connections.get(id);
+    }
     /**
      * Add a server configuration.
      */

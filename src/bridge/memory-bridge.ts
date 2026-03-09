@@ -1,9 +1,10 @@
 /**
- * Memory Bridge — sql.js + WASM scoring integration.
+ * Memory Bridge — sql.js + WASM scoring integration with IndexedDB persistence.
  *
  * Uses WASM core for SQL generation (mirrors ZeroClaw's SQLite schema)
  * and scoring (TF-IDF, cosine similarity, hybrid merge). sql.js
- * provides in-browser SQLite execution.
+ * provides in-browser SQLite execution. IndexedDB provides persistence
+ * across page reloads.
  */
 
 import type { Database } from 'sql.js';
@@ -11,8 +12,60 @@ import { getWasm } from './wasm-loader';
 
 let sqlDb: Database | null = null;
 
+// ── IndexedDB Persistence ─────────────────────────────────────────
+
+const IDB_DB_NAME = 'ezclaw-memory';
+const IDB_STORE_NAME = 'sqlitedb';
+const IDB_KEY = 'main';
+const AUTO_SAVE_INTERVAL_MS = 30_000;
+let autoSaveTimer: ReturnType<typeof setInterval> | null = null;
+
+function openIDB(): Promise<IDBDatabase> {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(IDB_DB_NAME, 1);
+        request.onupgradeneeded = () => {
+            request.result.createObjectStore(IDB_STORE_NAME);
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+async function loadFromIDB(): Promise<Uint8Array | null> {
+    try {
+        const db = await openIDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(IDB_STORE_NAME, 'readonly');
+            const store = tx.objectStore(IDB_STORE_NAME);
+            const req = store.get(IDB_KEY);
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => reject(req.error);
+        });
+    } catch {
+        return null;
+    }
+}
+
+async function saveToIDB(): Promise<void> {
+    if (!sqlDb) return;
+    try {
+        const data = sqlDb.export();
+        const db = await openIDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(IDB_STORE_NAME, 'readwrite');
+            const store = tx.objectStore(IDB_STORE_NAME);
+            const req = store.put(data, IDB_KEY);
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error);
+        });
+    } catch (e) {
+        console.warn('[EZ-Claw] Memory save to IndexedDB failed:', e);
+    }
+}
+
 /**
  * Initialize the memory system: load sql.js and create tables.
+ * If a previous database was saved in IndexedDB, it will be restored.
  */
 export async function initMemory(): Promise<void> {
     try {
@@ -20,13 +73,22 @@ export async function initMemory(): Promise<void> {
             locateFile: (file: string) => `https://sql.js.org/dist/${file}`,
         });
 
-        sqlDb = new SQL.Database();
+        // Try to restore from IndexedDB first
+        const savedData = await loadFromIDB();
+        if (savedData) {
+            sqlDb = new SQL.Database(savedData);
+            console.log('[EZ-Claw] Memory system restored from IndexedDB');
+        } else {
+            sqlDb = new SQL.Database();
+            const wasm = getWasm();
+            const createSql = wasm.memory_create_table_sql();
+            sqlDb.run(createSql);
+            console.log('[EZ-Claw] Memory system initialized (fresh database)');
+        }
 
-        const wasm = getWasm();
-        const createSql = wasm.memory_create_table_sql();
-        sqlDb.run(createSql);
-
-        console.log('[EZ-Claw] Memory system initialized (sql.js + WASM scoring)');
+        // Start periodic auto-save
+        if (autoSaveTimer) clearInterval(autoSaveTimer);
+        autoSaveTimer = setInterval(() => saveToIDB(), AUTO_SAVE_INTERVAL_MS);
     } catch (e) {
         console.warn('[EZ-Claw] Memory init failed (non-fatal):', e);
         sqlDb = null;
@@ -56,6 +118,7 @@ export async function loadMemoryFromData(data: Uint8Array): Promise<void> {
     });
 
     sqlDb = new SQL.Database(data);
+    await saveToIDB(); // Persist imported data
     console.log('[EZ-Claw] Memory loaded from saved data');
 }
 
@@ -86,6 +149,7 @@ export interface MemoryEntry {
 
 /**
  * Store a memory entry (mirrors ZeroClaw's Memory::store).
+ * Auto-persists to IndexedDB after write.
  */
 export function storeMemory(
     key: string,
@@ -93,16 +157,17 @@ export function storeMemory(
     category: string = 'core',
     sessionId: string = ''
 ): void {
-    const wasm = getWasm();
     const id = crypto.randomUUID();
     const timestamp = new Date().toISOString();
 
-    // Use parameterized approach for safety
     const db = getDb();
     db.run(
         'INSERT OR REPLACE INTO memories (id, key, content, category, timestamp, session_id) VALUES (?, ?, ?, ?, ?, ?)',
         [id, key, content, category, timestamp, sessionId || null]
     );
+
+    // Auto-save to IndexedDB
+    saveToIDB();
 }
 
 /**
@@ -199,11 +264,14 @@ export function listMemories(
 
 /**
  * Remove a memory by key (mirrors ZeroClaw's Memory::forget).
+ * Auto-persists to IndexedDB after delete.
  */
 export function forgetMemory(key: string): boolean {
     const db = getDb();
     db.run('DELETE FROM memories WHERE key = ?', [key]);
-    return db.getRowsModified() > 0;
+    const deleted = db.getRowsModified() > 0;
+    if (deleted) saveToIDB(); // Persist deletion
+    return deleted;
 }
 
 /**

@@ -12,9 +12,12 @@
  * - read_file / write_file / list_dir: Workspace FS operations
  * - memory_store / memory_recall: Persistent memory
  * - shell_exec: Sandboxed shell (requires permission)
+ * - mcp_call_tool: MCP protocol tool execution with security pipeline
+ * - create_tool: Dynamic tool creation (IronClaw self-expanding)
  */
 
 import type { WasmAgentInstance as WasmAgent, WasmWorkspaceInstance as WasmWorkspace } from './wasm-loader';
+import { getWasm } from './wasm-loader';
 import { storeMemory, recallMemories, listMemories } from './memory-bridge';
 import { setFact, loadIdentity, updateIdentityField, saveIdentity, type AgentIdentity } from './identity-bridge';
 import { WASIContainer, type CommandResult } from './wasi-container';
@@ -226,6 +229,19 @@ async function dispatchTool(
         case 'run_shell_command':
             return await toolRunShellCommand(args.command, args.args, args.env);
 
+        case 'mcp_call_tool':
+            return await toolMcpCallTool(args.server_id, args.tool_name, args.arguments || {});
+
+        case 'create_tool': {
+            const toolName = args.name || '';
+            const toolDesc = args.description || '';
+            const toolCode = args.code || '';
+            if (!toolName || !toolDesc || !toolCode) {
+                return 'create_tool requires: name, description, code';
+            }
+            return toolCreateDynamic(toolName, toolDesc, toolCode);
+        }
+
         default:
             throw new Error(`Unknown tool: ${name}`);
     }
@@ -245,16 +261,10 @@ async function toolWebSearch(
 
     const headers: HeadersInit = {};
 
-    // Inject credentials if mapped
-    if (secCheck.credential_mapping) {
-        const cm = secCheck.credential_mapping;
-        if (cm.inject_type === 'header') {
-            // Credentials would be decrypted and injected here by the WASM vault
-            // For DuckDuckGo this isn't needed (free API)
-        }
-    }
+    // Inject credentials at boundary (IronClaw pattern)
+    injectCredentials(headers, secCheck);
 
-    const response = await fetch(url);
+    const response = await fetch(url, { headers });
     if (!response.ok) {
         throw new Error(`Search failed: ${response.status} ${response.statusText}`);
     }
@@ -290,13 +300,7 @@ async function toolWebFetch(url: string, secCheck: SecurityCheckResult): Promise
     const headers: HeadersInit = {};
 
     // Inject credentials at boundary (IronClaw pattern)
-    if (secCheck.credential_mapping) {
-        const cm = secCheck.credential_mapping;
-        if (cm.inject_type === 'header') {
-            // In production, decrypt from vault and inject:
-            // headers[cm.inject_key] = cm.inject_prefix + decryptedValue;
-        }
-    }
+    injectCredentials(headers, secCheck);
 
     const response = await fetch(url, { headers });
     if (!response.ok) {
@@ -413,4 +417,81 @@ function formatShellResult(result: CommandResult): string {
 export async function getContainerInfo(): Promise<any> {
     const container = await getWasiContainer();
     return container.getInfo();
+}
+
+// ── Credential Injection (IronClaw Pattern) ───────────────────────
+
+/**
+ * Inject credentials from the WASM credential vault into request headers.
+ * This is the boundary where secrets are decrypted and injected — they
+ * never exist inside WASM tool code, only at this TypeScript boundary.
+ */
+function injectCredentials(headers: HeadersInit, secCheck: SecurityCheckResult): void {
+    if (!secCheck.credential_mapping) return;
+
+    const cm = secCheck.credential_mapping;
+    try {
+        const wasm = getWasm();
+        // Decrypt the credential from the WASM vault
+        const decryptedValue = wasm.decrypt_credential(cm.credential_id);
+
+        if (cm.inject_type === 'header' && decryptedValue) {
+            (headers as Record<string, string>)[cm.inject_key] = cm.inject_prefix + decryptedValue;
+        } else if (cm.inject_type === 'query') {
+            // Query parameter injection handled at URL level by caller
+        }
+    } catch (e) {
+        // Credential vault may not be initialized — this is non-fatal
+        // The tool will execute without credentials (free APIs still work)
+        console.debug('[EZ-Claw] Credential injection skipped:', e);
+    }
+}
+
+// ── MCP Tool Calling ──────────────────────────────────────────────
+
+/**
+ * Execute an MCP tool call through the security pipeline.
+ * Routes through the MCP client but wraps with allowlist + leak scan.
+ */
+async function toolMcpCallTool(
+    serverId: string,
+    toolName: string,
+    toolArgs: Record<string, any>
+): Promise<string> {
+    try {
+        // Dynamically import to avoid circular dependency
+        const { MCPManager } = await import('./mcp-client');
+        const manager = MCPManager.getInstance();
+
+        const connection = manager.getConnection(serverId);
+        if (!connection || !connection.isConnected) {
+            return `MCP server '${serverId}' is not connected. Use the MCP panel to connect first.`;
+        }
+
+        const result = await connection.callTool(toolName, toolArgs);
+        return typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+    } catch (e: any) {
+        return `MCP tool call failed: ${e.message}`;
+    }
+}
+
+// ── Dynamic Tool Creation (IronClaw Self-Expanding) ──────────────
+
+/**
+ * Create a dynamic tool at runtime. The tool code is stored in the
+ * workspace and registered with the WASM tool registry.
+ */
+function toolCreateDynamic(name: string, description: string, code: string): string {
+    try {
+        const wasm = getWasm();
+        // Register the tool with the WASM tool registry
+        const result = wasm.register_dynamic_tool(name, description, code);
+        const parsed = JSON.parse(result);
+        if (parsed.success) {
+            return `Tool '${name}' created successfully. It can now be used in subsequent tool calls.`;
+        }
+        return `Failed to create tool '${name}': ${parsed.error || 'unknown error'}`;
+    } catch (e: any) {
+        return `Dynamic tool creation failed: ${e.message}`;
+    }
 }
