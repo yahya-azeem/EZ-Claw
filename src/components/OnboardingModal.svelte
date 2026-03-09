@@ -1,57 +1,62 @@
 <script lang="ts">
   interface Props {
-    onComplete: (config: { provider: string; model: string; apiKey: string }) => void;
+    onComplete: (config: {
+      provider: string;
+      model: string;
+      apiKey: string;
+    }) => void;
   }
 
   let { onComplete }: Props = $props();
 
   let step = $state(1);
-  let selectedProvider = $state('deepseek');
-  let apiKey = $state('');
-  let selectedModel = $state('deepseek-chat');
+  let selectedProvider = $state("deepseek");
+  let apiKey = $state("");
+  let selectedModel = $state("deepseek-chat");
 
   const providers = [
     {
-      id: 'deepseek',
-      name: 'DeepSeek',
-      icon: '🧠',
-      description: 'Free, powerful AI model. Great default choice.',
-      defaultModel: 'deepseek-chat',
+      id: "deepseek",
+      name: "DeepSeek",
+      icon: "🧠",
+      description: "Free, powerful AI model. Great default choice.",
+      defaultModel: "deepseek-chat",
       free: true,
-      signupUrl: 'https://platform.deepseek.com/',
+      signupUrl: "https://platform.deepseek.com/",
     },
     {
-      id: 'openrouter',
-      name: 'OpenRouter',
-      icon: '🌐',
-      description: 'Access 100+ models through one API. Free tier available.',
-      defaultModel: 'deepseek/deepseek-chat',
+      id: "openrouter",
+      name: "OpenRouter",
+      icon: "🌐",
+      description: "Access 100+ models through one API. Free tier available.",
+      defaultModel: "deepseek/deepseek-chat",
       free: true,
-      signupUrl: 'https://openrouter.ai/',
+      signupUrl: "https://openrouter.ai/",
     },
     {
-      id: 'ollama',
-      name: 'Ollama',
-      icon: '🦙',
-      description: 'Run models locally on your machine. Completely free & private.',
-      defaultModel: 'llama3',
+      id: "ollama",
+      name: "Ollama",
+      icon: "🦙",
+      description:
+        "Run models locally on your machine. Completely free & private.",
+      defaultModel: "llama3",
       free: true,
-      signupUrl: 'https://ollama.ai/',
+      signupUrl: "https://ollama.ai/",
     },
     {
-      id: 'openai',
-      name: 'OpenAI',
-      icon: '💚',
-      description: 'GPT-4o and more. Paid API.',
-      defaultModel: 'gpt-4o-mini',
+      id: "openai",
+      name: "OpenAI",
+      icon: "💚",
+      description: "GPT-4o and more. Paid API.",
+      defaultModel: "gpt-4o-mini",
       free: false,
-      signupUrl: 'https://platform.openai.com/',
+      signupUrl: "https://platform.openai.com/",
     },
   ];
 
   function selectProvider(id: string) {
     selectedProvider = id;
-    const p = providers.find(p => p.id === id);
+    const p = providers.find((p) => p.id === id);
     if (p) selectedModel = p.defaultModel;
   }
 
@@ -71,15 +76,18 @@
         <div class="onboarding-header">
           <span class="big-icon">🦀</span>
           <h1>Welcome to EZ-Claw</h1>
-          <p>ZeroClaw's AI engine, running locally in your browser via WebAssembly.</p>
+          <p>
+            Your AI agent, running locally in your browser. Private, fast, and
+            powerful.
+          </p>
         </div>
 
         <div class="features">
           <div class="feature">
             <span class="feature-icon">⚡</span>
             <div>
-              <strong>WASM Powered</strong>
-              <p>Core engine compiled from Rust — fast & efficient</p>
+              <strong>Lightning Fast</strong>
+              <p>Core engine compiled from Rust — blazing performance</p>
             </div>
           </div>
           <div class="feature">
@@ -98,7 +106,7 @@
           </div>
         </div>
 
-        <button class="btn btn-primary btn-lg" onclick={() => step = 2}>
+        <button class="btn btn-primary btn-lg" onclick={() => (step = 2)}>
           Get Started →
         </button>
       </div>
@@ -125,22 +133,28 @@
         </div>
 
         <div class="step-actions">
-          <button class="btn btn-secondary" onclick={() => step = 1}>← Back</button>
-          <button class="btn btn-primary" onclick={() => step = 3}>Continue →</button>
+          <button class="btn btn-secondary" onclick={() => (step = 1)}
+            >← Back</button
+          >
+          <button class="btn btn-primary" onclick={() => (step = 3)}
+            >Continue →</button
+          >
         </div>
       </div>
     {:else if step === 3}
       <div class="onboarding-step fade-in">
         <h2>Enter Your API Key</h2>
         <p class="step-subtitle">
-          {#if selectedProvider === 'ollama'}
-            Ollama runs locally — no API key needed! Just make sure Ollama is running.
+          {#if selectedProvider === "ollama"}
+            Ollama runs locally — no API key needed! Just make sure Ollama is
+            running.
           {:else}
-            Get your key from the provider's dashboard. Your key is stored locally and never sent to our servers.
+            Get your key from the provider's dashboard. Your key is stored
+            locally and never sent to our servers.
           {/if}
         </p>
 
-        {#if selectedProvider !== 'ollama'}
+        {#if selectedProvider !== "ollama"}
           <label class="field">
             <span class="field-label">API Key</span>
             <input
@@ -153,11 +167,13 @@
 
           <a
             class="signup-link"
-            href={providers.find(p => p.id === selectedProvider)?.signupUrl}
+            href={providers.find((p) => p.id === selectedProvider)?.signupUrl}
             target="_blank"
             rel="noopener"
           >
-            Don't have a key? Sign up at {providers.find(p => p.id === selectedProvider)?.name} →
+            Don't have a key? Sign up at {providers.find(
+              (p) => p.id === selectedProvider,
+            )?.name} →
           </a>
         {/if}
 
@@ -167,11 +183,13 @@
         </label>
 
         <div class="step-actions">
-          <button class="btn btn-secondary" onclick={() => step = 2}>← Back</button>
+          <button class="btn btn-secondary" onclick={() => (step = 2)}
+            >← Back</button
+          >
           <button
             class="btn btn-primary"
             onclick={handleComplete}
-            disabled={selectedProvider !== 'ollama' && !apiKey.trim()}
+            disabled={selectedProvider !== "ollama" && !apiKey.trim()}
           >
             Start Chatting 🚀
           </button>

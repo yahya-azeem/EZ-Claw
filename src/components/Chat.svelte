@@ -537,31 +537,33 @@
       <div class="empty-state">
         <div class="empty-icon">🦀</div>
         <h2>Welcome to EZ-Claw</h2>
-        <p>ZeroClaw running in your browser via WebAssembly</p>
+        <p>Your AI agent — running locally in your browser</p>
         <div class="quick-prompts">
           <button
             class="quick-prompt"
             onclick={() => {
-              inputText = "Help me write a Python function";
+              inputText = "Create a project README.md file for a new web app";
             }}
           >
-            💡 Write a Python function
+            📝 Create a README file
           </button>
           <button
             class="quick-prompt"
             onclick={() => {
-              inputText = "Explain WASM to me";
+              inputText =
+                "Search the web for the latest news about AI agents and summarize what you find";
             }}
           >
-            📚 Explain WASM
+            🔍 Research & summarize
           </button>
           <button
             class="quick-prompt"
             onclick={() => {
-              inputText = "Debug this code for me";
+              inputText =
+                "List the files in my workspace and organize them into folders by type";
             }}
           >
-            🔍 Debug code
+            📂 Organize my workspace
           </button>
         </div>
       </div>

@@ -44,7 +44,7 @@
 
         // Welcome message
         lines = [
-            { text: "🦀 EZ-Claw Terminal — WASI Sandbox", type: "info" },
+            { text: "🦀 EZ-Claw Terminal — Secure Sandbox", type: "info" },
             {
                 text: 'Type "help" for available commands. Use tier selector to switch sandbox mode.',
                 type: "info",
@@ -177,9 +177,9 @@
                                     onclick={() => changeTier("container2wasm")}
                                 >
                                     <span class="tier-icon">🐧</span> Alpine
-                                    (c2w)
+                                    (Full OS)
                                     <span class="tier-desc"
-                                        >Real Linux via container2wasm</span
+                                        >Real Linux sandbox</span
                                     >
                                 </button>
                                 <button
@@ -187,9 +187,9 @@
                                     class:active={currentTier === "wasi"}
                                     onclick={() => changeTier("wasi")}
                                 >
-                                    <span class="tier-icon">🌐</span> WASI
+                                    <span class="tier-icon">🌐</span> Shell
                                     <span class="tier-desc"
-                                        >BusyBox shell (fallback)</span
+                                        >Lightweight fallback</span
                                     >
                                 </button>
                                 <button

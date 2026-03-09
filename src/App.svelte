@@ -14,7 +14,11 @@
   import PersonaManager from "./components/PersonaManager.svelte";
   import { initWasm, isWasmReady } from "./bridge/wasm-loader";
   import "./bridge/agent-api"; // Expose window.EZClaw headless API
-  import { isValidProvider, getValidModels, getDefaultModel } from "./bridge/providers";
+  import {
+    isValidProvider,
+    getValidModels,
+    getDefaultModel,
+  } from "./bridge/providers";
   import {
     initStorage,
     getAllSessions,
@@ -142,7 +146,10 @@
             await initMemory();
           }
           // Auto-save memory every 30 seconds
-          memoryAutoSaveId = setInterval(persistMemory, 30000) as unknown as number;
+          memoryAutoSaveId = setInterval(
+            persistMemory,
+            30000,
+          ) as unknown as number;
         } catch (memErr) {
           console.warn("[EZ-Claw] Memory init failed:", memErr);
           // Try fresh init
@@ -168,8 +175,13 @@
       const savedApiUrl = await getConfig("apiUrl");
 
       // Force reset to OpenRouter if provider is unknown or novita (which has issues)
-      if (savedProvider && (!isValidProvider(savedProvider) || savedProvider === "novita")) {
-        console.warn(`[EZ-Claw] Invalid/unavailable provider "${savedProvider}", resetting to openrouter`);
+      if (
+        savedProvider &&
+        (!isValidProvider(savedProvider) || savedProvider === "novita")
+      ) {
+        console.warn(
+          `[EZ-Claw] Invalid/unavailable provider "${savedProvider}", resetting to openrouter`,
+        );
         provider = "openrouter";
         await saveConfig("provider", provider);
       } else if (savedProvider) {
@@ -183,9 +195,15 @@
 
       // Validate model for provider - reset to default if invalid
       const providerValidModels = getValidModels(provider);
-      const isValid = providerValidModels.length === 0 || providerValidModels.some(m => model?.includes(m.split("/").pop() || m));
+      const isValid =
+        providerValidModels.length === 0 ||
+        providerValidModels.some((m) =>
+          model?.includes(m.split("/").pop() || m),
+        );
       if (!isValid && model) {
-        console.warn(`[EZ-Claw] Invalid model "${model}" for provider "${provider}", resetting to default`);
+        console.warn(
+          `[EZ-Claw] Invalid model "${model}" for provider "${provider}", resetting to default`,
+        );
         model = getDefaultModel(provider);
         await saveConfig("model", model);
       }
@@ -309,7 +327,7 @@
           "EZ-Claw"}
         {model}
         {provider}
-        wasmStatus={wasmReady}
+        engineStatus={wasmReady}
         onToggleSidebar={() => (showSidebar = !showSidebar)}
         onOpenSettings={() => (showSettings = true)}
         onOpenWorkspace={() => (showWorkspace = true)}

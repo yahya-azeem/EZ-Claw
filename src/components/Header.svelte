@@ -3,7 +3,7 @@
     sessionTitle: string;
     model: string;
     provider: string;
-    wasmStatus: boolean;
+    engineStatus: boolean;
     onToggleSidebar: () => void;
     onOpenSettings: () => void;
     onOpenWorkspace: () => void;
@@ -19,7 +19,7 @@
     sessionTitle,
     model,
     provider,
-    wasmStatus,
+    engineStatus,
     onToggleSidebar,
     onOpenSettings,
     onOpenWorkspace,
@@ -63,8 +63,8 @@
     </div>
     <div
       class="status-dot"
-      class:active={wasmStatus}
-      title={wasmStatus ? "WASM Ready" : "WASM Loading"}
+      class:active={engineStatus}
+      title={engineStatus ? "Engine Ready" : "Engine Loading"}
     ></div>
     <button
       class="btn btn-ghost btn-icon"
@@ -116,7 +116,9 @@
         stroke="currentColor"
         stroke-width="2"
       >
-        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        <path
+          d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+        />
       </svg>
     </button>
     <button

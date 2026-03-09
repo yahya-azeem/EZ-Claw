@@ -534,7 +534,7 @@
                                 <input
                                     type="text"
                                     bind:value={newImageUrl}
-                                    placeholder="WASM blob URL"
+                                    placeholder="Container image URL"
                                     class="input-field"
                                 />
                                 <select

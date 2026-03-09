@@ -141,8 +141,8 @@
 
   <div class="sidebar-footer">
     <div class="version-info">
-      <span class="badge badge-success">WASM</span>
-      <span class="footer-text">Powered by ZeroClaw</span>
+      <span class="badge badge-success">v2</span>
+      <span class="footer-text">Powered by EZ-Claw</span>
     </div>
   </div>
 </aside>
