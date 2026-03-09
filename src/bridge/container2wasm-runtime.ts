@@ -109,13 +109,15 @@ export function getDefaultImages(): ContainerImage[] {
     const arch = detectArch();
     // Map CPU arch names to Docker-convention filenames
     const archFile = arch === 'x86_64' ? 'amd64' : arch === 'aarch64' ? 'arm64' : arch;
+    // Use Vite's base URL so it works on both local dev and deployed sites
+    const base = (typeof import.meta !== 'undefined' && import.meta.env?.BASE_URL) || './';
     return [
         {
             id: 'alpine-default',
             name: 'Alpine Linux',
             os: 'alpine',
             arch,
-            wasmUrl: `/containers/alpine-${archFile}.wasm`,
+            wasmUrl: `${base}containers/alpine-${archFile}.wasm`,
             size: '~60MB',
             description: 'Lightweight Linux with apk package manager. Default container.',
         },
