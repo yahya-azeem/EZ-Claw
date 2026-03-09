@@ -1,11 +1,18 @@
 <script lang="ts">
+    import { onMount, tick } from "svelte";
+    import {
+        SandboxManager,
+        type SandboxTier,
+        type ShellResult,
+    } from "../bridge/sandbox-manager";
     /**
      * WorkspacePanel — unified workspace, container, and layer management.
      *
-     * Three tabs:
+     * Four tabs:
      *   📁 Files — browse/edit workspace files (OPFS or user-picked directory)
      *   🐧 Container — manage container2wasm images, hot-swap, status
      *   🔀 Layers — hot-swap persona, skills, view layer state
+     *   >_ Terminal — manual shell for technical users
      */
     import {
         initWorkspace,
@@ -56,7 +63,7 @@
     let { isOpen, onClose }: Props = $props();
 
     // ── Tab State ────────────────────────────────────────────────
-    type Tab = "files" | "container" | "layers";
+    type Tab = "files" | "container" | "layers" | "terminal";
     let activeTab: Tab = $state("files");
 
     // ── Files Tab ────────────────────────────────────────────────
@@ -84,6 +91,147 @@
     let activeSkillSetId: string | null = $state(null);
     let showSaveSkillSet = $state(false);
     let newSkillSetLabel = $state("");
+
+    // ── Terminal Tab ─────────────────────────────────────────────
+    let termLines: Array<{
+        text: string;
+        type: "input" | "stdout" | "stderr" | "info";
+    }> = $state([]);
+    let termInput = $state("");
+    let termTier: SandboxTier = $state("container2wasm");
+    let termExecuting = $state(false);
+    let termEl: HTMLDivElement | undefined = $state();
+    let termInputEl: HTMLInputElement | undefined = $state();
+    let termManager: SandboxManager | null = null;
+    let termHistory: string[] = $state([]);
+    let termHistoryIdx = $state(-1);
+    let termInitialized = $state(false);
+
+    function initTerminal() {
+        if (termInitialized) return;
+        termInitialized = true;
+        termManager = new SandboxManager({
+            tier: "container2wasm",
+            enabled: true,
+        });
+        termManager.onOutput((line) => {
+            termLines = [
+                ...termLines,
+                {
+                    text: line,
+                    type: line.includes("\x1b[31m") ? "stderr" : "stdout",
+                },
+            ];
+            scrollTerminal();
+        });
+        termLines = [
+            {
+                text: "┌─────────────────────────────────────────┐",
+                type: "info",
+            },
+            {
+                text: "│  EZ-Claw Terminal — Secure Sandbox      │",
+                type: "info",
+            },
+            {
+                text: "│  Type commands below. Use ▾ to switch   │",
+                type: "info",
+            },
+            {
+                text: "│  between Container / Shell / Native.    │",
+                type: "info",
+            },
+            {
+                text: "└─────────────────────────────────────────┘",
+                type: "info",
+            },
+            { text: "", type: "info" },
+        ];
+    }
+
+    function scrollTerminal() {
+        tick().then(() => {
+            if (termEl) termEl.scrollTop = termEl.scrollHeight;
+        });
+    }
+
+    async function executeTermCommand() {
+        const cmd = termInput.trim();
+        if (!cmd || termExecuting || !termManager) return;
+        termLines = [...termLines, { text: `$ ${cmd}`, type: "input" }];
+        termHistory = [cmd, ...termHistory.slice(0, 49)];
+        termHistoryIdx = -1;
+        termInput = "";
+        termExecuting = true;
+        scrollTerminal();
+
+        try {
+            const result: ShellResult = await termManager.execute(cmd);
+            if (result.stdout.trim()) {
+                termLines = [
+                    ...termLines,
+                    { text: result.stdout.trimEnd(), type: "stdout" },
+                ];
+            }
+            if (result.stderr.trim()) {
+                termLines = [
+                    ...termLines,
+                    { text: result.stderr.trimEnd(), type: "stderr" },
+                ];
+            }
+        } catch (err: any) {
+            termLines = [
+                ...termLines,
+                { text: `Error: ${err.message}`, type: "stderr" },
+            ];
+        }
+
+        termExecuting = false;
+        scrollTerminal();
+        termInputEl?.focus();
+    }
+
+    function termKeydown(e: KeyboardEvent) {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            executeTermCommand();
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            if (termHistoryIdx < termHistory.length - 1) {
+                termHistoryIdx++;
+                termInput = termHistory[termHistoryIdx];
+            }
+        } else if (e.key === "ArrowDown") {
+            e.preventDefault();
+            if (termHistoryIdx > 0) {
+                termHistoryIdx--;
+                termInput = termHistory[termHistoryIdx];
+            } else {
+                termHistoryIdx = -1;
+                termInput = "";
+            }
+        } else if (e.key === "l" && e.ctrlKey) {
+            e.preventDefault();
+            termLines = [];
+        }
+    }
+
+    function changeTermTier(tier: SandboxTier) {
+        if (!termManager) return;
+        termTier = tier;
+        termManager.setTier(tier);
+        const label =
+            tier === "container2wasm"
+                ? "Container"
+                : tier === "wasi"
+                  ? "Shell"
+                  : "Native";
+        termLines = [
+            ...termLines,
+            { text: `Switched to ${label} sandbox`, type: "info" },
+        ];
+        scrollTerminal();
+    }
 
     // ── Effects ──────────────────────────────────────────────────
 
@@ -322,6 +470,15 @@
                             activeTab = "layers";
                             loadCurrentTab();
                         }}>🔀 Layers</button
+                    >
+                    <button
+                        class="ws-tab"
+                        class:active={activeTab === "terminal"}
+                        onclick={() => {
+                            activeTab = "terminal";
+                            initTerminal();
+                            tick().then(() => termInputEl?.focus());
+                        }}>>_ Terminal</button
                     >
                 </div>
                 <button class="close-btn" onclick={onClose} aria-label="Close"
@@ -768,6 +925,63 @@
                                     >{containerStatus.image || "None"}</span
                                 >
                             </div>
+                        </div>
+                    </div>
+                {:else if activeTab === "terminal"}
+                    <!-- ═══ TERMINAL TAB ═══ -->
+                    <div class="terminal-tab">
+                        <div class="term-toolbar">
+                            <div class="term-tier-select">
+                                <span class="term-label">Sandbox:</span>
+                                <button
+                                    class="term-tier-btn"
+                                    class:active={termTier === "container2wasm"}
+                                    onclick={() =>
+                                        changeTermTier("container2wasm")}
+                                    >🐧 Container</button
+                                >
+                                <button
+                                    class="term-tier-btn"
+                                    class:active={termTier === "wasi"}
+                                    onclick={() => changeTermTier("wasi")}
+                                    >⚡ Shell</button
+                                >
+                                <button
+                                    class="term-tier-btn"
+                                    class:active={termTier === "native"}
+                                    onclick={() => changeTermTier("native")}
+                                    >🖥️ Native</button
+                                >
+                            </div>
+                            <button
+                                class="btn btn-sm btn-ghost"
+                                onclick={() => {
+                                    termLines = [];
+                                }}>🗑️ Clear</button
+                            >
+                        </div>
+
+                        <div class="term-output" bind:this={termEl}>
+                            {#each termLines as line}
+                                <div class="term-line {line.type}">
+                                    {line.text}
+                                </div>
+                            {/each}
+                        </div>
+
+                        <div class="term-input-row">
+                            <span class="term-prompt"
+                                >{termExecuting ? "⏳" : "$"}</span
+                            >
+                            <input
+                                type="text"
+                                class="term-input"
+                                bind:this={termInputEl}
+                                bind:value={termInput}
+                                onkeydown={termKeydown}
+                                placeholder="Type a command..."
+                                disabled={termExecuting}
+                            />
                         </div>
                     </div>
                 {/if}
@@ -1284,5 +1498,108 @@
     }
     .btn-ghost:hover {
         background: rgba(255, 255, 255, 0.05);
+    }
+
+    /* ═══ TERMINAL TAB ═══ */
+    .terminal-tab {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        gap: 0;
+    }
+    .term-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--space-sm) var(--space-md);
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+    }
+    .term-tier-select {
+        display: flex;
+        align-items: center;
+        gap: var(--space-xs);
+    }
+    .term-label {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        margin-right: var(--space-xs);
+    }
+    .term-tier-btn {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
+        padding: 3px 10px;
+        border-radius: var(--radius-sm);
+        font-size: 11px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+    .term-tier-btn:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: var(--text-primary);
+    }
+    .term-tier-btn.active {
+        background: rgba(99, 102, 241, 0.2);
+        border-color: var(--accent-primary);
+        color: var(--accent-primary);
+    }
+    .term-output {
+        flex: 1;
+        overflow-y: auto;
+        padding: var(--space-sm) var(--space-md);
+        font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        background: rgba(0, 0, 0, 0.3);
+        scroll-behavior: smooth;
+    }
+    .term-line {
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+    .term-line.input {
+        color: #58a6ff;
+        font-weight: 600;
+    }
+    .term-line.stdout {
+        color: var(--text-primary);
+    }
+    .term-line.stderr {
+        color: #f85149;
+    }
+    .term-line.info {
+        color: var(--text-tertiary);
+    }
+    .term-input-row {
+        display: flex;
+        align-items: center;
+        padding: var(--space-sm) var(--space-md);
+        border-top: 1px solid var(--border);
+        background: rgba(0, 0, 0, 0.2);
+        flex-shrink: 0;
+    }
+    .term-prompt {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 13px;
+        color: #3fb950;
+        margin-right: var(--space-sm);
+        font-weight: 700;
+    }
+    .term-input {
+        flex: 1;
+        background: none;
+        border: none;
+        color: var(--text-primary);
+        font-family: "JetBrains Mono", "Fira Code", monospace;
+        font-size: 12px;
+        outline: none;
+        caret-color: #3fb950;
+    }
+    .term-input::placeholder {
+        color: var(--text-tertiary);
+    }
+    .term-input:disabled {
+        opacity: 0.5;
     }
 </style>
