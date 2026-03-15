@@ -17,6 +17,7 @@ import {
     isContainerReady,
     executeCommand as c2wExecute,
     getContainerStatus,
+    C2WRuntime,
 } from './container2wasm-runtime';
 
 export type SandboxTier = 'container2wasm' | 'wasi' | 'native';
@@ -286,14 +287,23 @@ export class SandboxManager {
     private config: SandboxConfig;
     private wasi: WasiSandbox;
     private native: NativeCLISandbox;
+    private c2w: C2WRuntime | null = null;
     private outputListeners: ((line: string) => void)[] = [];
     private commandHistory: AuditEntry[] = [];
     private readonly MAX_HISTORY = 500;
 
-    constructor(config: Partial<SandboxConfig> = {}) {
+    constructor(config: Partial<SandboxConfig> = {}, c2w?: C2WRuntime) {
         this.config = { ...DEFAULT_CONFIG, ...config };
         this.wasi = new WasiSandbox(this.config);
         this.native = new NativeCLISandbox(this.config);
+        this.c2w = c2w || null;
+
+        // Forward output from isolated C2W runtime
+        if (this.c2w) {
+            this.c2w.onEvent('c2w:output', (evt: any) => {
+                if (evt.data) this.emit(evt.data);
+            });
+        }
     }
 
     /** Set the active sandbox tier. */
@@ -328,10 +338,13 @@ export class SandboxManager {
 
         switch (this.config.tier) {
             case 'container2wasm': {
-                if (isContainerReady()) {
+                const runtimeReady = this.c2w ? this.c2w.isReady() : isContainerReady();
+                if (runtimeReady) {
                     const start = performance.now();
                     try {
-                        const c2wResult = await c2wExecute(command, this.config.timeoutMs);
+                        const c2wResult = await (this.c2w
+                            ? this.c2w.execute(command, this.config.timeoutMs)
+                            : c2wExecute(command, this.config.timeoutMs));
                         result = {
                             exitCode: c2wResult.exit_code,
                             stdout: c2wResult.stdout.slice(0, this.config.maxOutputBytes),
