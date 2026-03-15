@@ -551,6 +551,8 @@ function createWASIImports(image: ContainerImage): Record<string, Function> {
         fd_filestat_get: () => 0,
         fd_filestat_set_size: () => 0,
         fd_filestat_set_times: () => 0,
+        fd_fdstat_set_flags: () => 0,
+        fd_fdstat_set_rights: () => 0,
         fd_allocate: () => 0,
         fd_advise: () => 0,
         fd_datasync: () => 0,
@@ -568,6 +570,14 @@ function createWASIImports(image: ContainerImage): Record<string, Function> {
         sock_recv: () => 58,
         sock_send: () => 58,
         sock_shutdown: () => 58,
+        sock_open: () => 58,
+        sock_connect: () => 58,
+        sock_listen: () => 58,
+        sock_bind: () => 58,
+        sock_getlocaladdr: () => 58,
+        sock_getpeeraddr: () => 58,
+        sock_setsockopt: () => 58,
+        sock_getsockopt: () => 58,
     };
 }
 
