@@ -32,21 +32,28 @@
   } from "../bridge/tool-runtime";
   import { SandboxManager } from "../bridge/sandbox-manager";
 
-  // Singleton sandbox manager for shell_exec
-  let sandboxManager: SandboxManager | null = null;
+  // Per-Claw sandbox managers — isolated so outputs never leak between Claws
+  const sandboxes = new Map<string, SandboxManager>();
   function getSandbox(): SandboxManager {
-    if (!sandboxManager)
-      sandboxManager = new SandboxManager({ tier: "wasi", enabled: true });
-    return sandboxManager;
+    const key = sessionId || "__default__";
+    let sb = sandboxes.get(key);
+    if (!sb) {
+      sb = new SandboxManager({ tier: "wasi", enabled: true });
+      sandboxes.set(key, sb);
+    }
+    return sb;
   }
 
-  // Shared workspace singleton so file state persists between tool calls
-  let workspaceInstance: any = null;
+  // Per-Claw workspaces — each Claw has its own virtual filesystem
+  const workspaces = new Map<string, any>();
   function getSharedWorkspace(): any {
-    if (!workspaceInstance) {
-      workspaceInstance = new (getWasm() as any).WasmWorkspace();
+    const key = sessionId || "__default__";
+    let ws = workspaces.get(key);
+    if (!ws) {
+      ws = new (getWasm() as any).WasmWorkspace();
+      workspaces.set(key, ws);
     }
-    return workspaceInstance;
+    return ws;
   }
 
   interface Props {

@@ -10,45 +10,13 @@ permissions:
   pages: write
   id-token: write
 
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
-  # ── Step 1: Detect what changed ─────────────────────────────────
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      wasm: ${{ steps.filter.outputs.wasm }}
-      frontend: ${{ steps.filter.outputs.frontend }}
-      containers: ${{ steps.filter.outputs.containers }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            wasm:
-              - 'crates/**'
-              - 'Cargo.toml'
-              - 'Cargo.lock'
-            frontend:
-              - 'src/**'
-              - 'index.html'
-              - 'vite.config.ts'
-              - 'tsconfig.json'
-              - 'package.json'
-              - 'package-lock.json'
-              - 'public/**'
-            containers:
-              - 'public/containers/**'
-
-  # ── Step 2: Build ───────────────────────────────────────────────
   build:
-    needs: changes
-    # Run if anything relevant changed, or on manual dispatch
-    if: >-
-      needs.changes.outputs.wasm == 'true' ||
-      needs.changes.outputs.frontend == 'true' ||
-      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -58,15 +26,24 @@ jobs:
         with:
           node-version: '22'
 
-      # ── WASM build (only if crates/ changed) ──────────────────
+      # ── Restore cached WASM pkg (always runs first) ────────────
+      - name: Cache WASM pkg output
+        id: wasm-cache
+        uses: actions/cache@v4
+        with:
+          path: pkg
+          key: ${{ runner.os }}-wasm-pkg-${{ hashFiles('crates/**') }}
+          restore-keys: ${{ runner.os }}-wasm-pkg-
+
+      # ── WASM build (only when pkg/ not cached) ─────────────────
       - name: Install Rust and wasm32 target
-        if: needs.changes.outputs.wasm == 'true' || github.event_name == 'workflow_dispatch'
+        if: steps.wasm-cache.outputs.cache-hit != 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
 
       - name: Cache Cargo registry
-        if: needs.changes.outputs.wasm == 'true' || github.event_name == 'workflow_dispatch'
+        if: steps.wasm-cache.outputs.cache-hit != 'true'
         uses: actions/cache@v4
         with:
           path: |
@@ -75,37 +52,21 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Cache WASM target
-        if: needs.changes.outputs.wasm == 'true' || github.event_name == 'workflow_dispatch'
-        uses: actions/cache@v4
-        with:
-          path: crates/ezclaw-core/target
-          key: ${{ runner.os }}-wasm-target-${{ hashFiles('crates/ezclaw-core/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-wasm-target-
-
       - name: Generate Cargo.lock
-        if: needs.changes.outputs.wasm == 'true' || github.event_name == 'workflow_dispatch'
+        if: steps.wasm-cache.outputs.cache-hit != 'true'
         run: cd crates/ezclaw-core && cargo generate-lockfile
 
       - name: Install wasm-pack
-        if: needs.changes.outputs.wasm == 'true' || github.event_name == 'workflow_dispatch'
+        if: steps.wasm-cache.outputs.cache-hit != 'true'
         run: cargo install wasm-pack
 
       - name: Build WASM
-        if: needs.changes.outputs.wasm == 'true' || github.event_name == 'workflow_dispatch'
+        if: steps.wasm-cache.outputs.cache-hit != 'true'
         run: |
           export RUSTFLAGS="-C target-feature=+bulk-memory"
           npm run wasm:build 2>&1
 
-      # ── Restore cached WASM pkg (when only frontend changed) ──
-      - name: Cache WASM pkg output
-        uses: actions/cache@v4
-        with:
-          path: pkg
-          key: ${{ runner.os }}-wasm-pkg-${{ hashFiles('crates/**') }}
-          restore-keys: ${{ runner.os }}-wasm-pkg-
-
-      # ── Container blobs ───────────────────────────────────────
+      # ── Container blobs ────────────────────────────────────────
       - name: Cache container blobs
         uses: actions/cache@v4
         with:
@@ -124,13 +85,12 @@ jobs:
             sudo mv c2w /usr/local/bin/
 
             echo "Building Alpine container blob with container2wasm..."
-            # Build Alpine Linux container → WASM blob
             c2w --target-arch=amd64 alpine:3.20 containers/alpine-amd64.wasm
             echo "Built: $(stat -c%s containers/alpine-amd64.wasm) bytes"
           fi
           cp containers/*.wasm public/containers/
 
-      # ── Frontend build (always runs) ──────────────────────────
+      # ── Frontend build ─────────────────────────────────────────
       - name: Install dependencies
         run: npm install
 
@@ -142,7 +102,7 @@ jobs:
         with:
           path: dist
 
-  # ── Step 3: Deploy ──────────────────────────────────────────────
+  # ── Deploy ───────────────────────────────────────────────────
   deploy:
     environment:
       name: github-pages
