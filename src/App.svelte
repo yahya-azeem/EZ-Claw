@@ -435,6 +435,7 @@
   <WorkspacePanel
     isOpen={showWorkspace}
     onClose={() => (showWorkspace = false)}
+    sessionId={activeSessionId}
   />
   <SecurityDashboard
     isOpen={showSecurity}

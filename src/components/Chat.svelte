@@ -33,29 +33,13 @@
   import { SandboxManager } from "../bridge/sandbox-manager";
   import { C2WRuntime } from "../bridge/container2wasm-runtime";
 
-  // Per-Claw isolated runtimes — each Claw gets its own Linux kernel instance
-  const runtimes = new Map<string, C2WRuntime>();
+  // Per-Claw run-time instances — using centralized registry for isolation
   function getRuntime(): C2WRuntime {
-    const key = sessionId || "__default__";
-    let rt = runtimes.get(key);
-    if (!rt) {
-      rt = new C2WRuntime();
-      runtimes.set(key, rt);
-    }
-    return rt;
+    return C2WRuntime.getInstance(sessionId || "__default__");
   }
 
-  // Per-Claw sandbox managers — isolated so outputs never leak between Claws
-  const sandboxes = new Map<string, SandboxManager>();
   function getSandbox(): SandboxManager {
-    const key = sessionId || "__default__";
-    let sb = sandboxes.get(key);
-    if (!sb) {
-      // Create with isolated C2W runtime
-      sb = new SandboxManager({ tier: "container2wasm", enabled: true }, getRuntime());
-      sandboxes.set(key, sb);
-    }
-    return sb;
+    return SandboxManager.getInstance(sessionId || "__default__");
   }
 
   // Per-Claw workspaces — each Claw has its own virtual filesystem

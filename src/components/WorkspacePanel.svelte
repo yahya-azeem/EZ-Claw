@@ -28,7 +28,7 @@
     } from "../layers/workspace-layer";
     import {
         getContainerImages,
-        getContainerStatus,
+        getContainerStatusForSession,
         swapContainer,
         loadContainer,
         isContainerReady,
@@ -37,6 +37,8 @@
         detectArch,
         onC2WEvent,
         type ContainerImage,
+        type ContainerArch,
+        C2WRuntime,
     } from "../bridge/container2wasm-runtime";
     import {
         getSkills,
@@ -58,9 +60,10 @@
     interface Props {
         isOpen: boolean;
         onClose: () => void;
+        sessionId: string | null;
     }
 
-    let { isOpen, onClose }: Props = $props();
+    let { isOpen, onClose, sessionId }: Props = $props();
 
     // ── Tab State ────────────────────────────────────────────────
     type Tab = "files" | "container" | "layers" | "terminal";
@@ -76,13 +79,18 @@
 
     // ── Container Tab ────────────────────────────────────────────
     let containerImages: ContainerImage[] = $state([]);
-    let containerStatus = $state(getContainerStatus());
+    let containerStatus = $state({ ready: false, image: null, os: 'none', arch: detectArch() as ContainerArch });
     let loadProgress = $state(0);
     let isLoadingContainer = $state(false);
     let showAddImage = $state(false);
     let newImageUrl = $state("");
     let newImageName = $state("");
     let newImageOS = $state("alpine");
+
+    // Helper to refresh status
+    function refreshStatus() {
+        containerStatus = getContainerStatusForSession(sessionId);
+    }
 
     // ── Layers Tab ───────────────────────────────────────────────
     let personas: PersonaEntry[] = $state([]);
@@ -110,10 +118,8 @@
     function initTerminal() {
         if (termInitialized) return;
         termInitialized = true;
-        termManager = new SandboxManager({
-            tier: "container2wasm",
-            enabled: true,
-        });
+        // Use centralized registry to ensure we use the same isolated instance as the chat session
+        termManager = SandboxManager.getInstance(sessionId || "default");
         termManager.onOutput((line) => {
             termLines = [
                 ...termLines,
@@ -246,7 +252,7 @@
             loadFiles();
         } else if (activeTab === "container") {
             containerImages = getContainerImages();
-            containerStatus = getContainerStatus();
+            refreshStatus();
         } else if (activeTab === "layers") {
             personas = listPersonas();
             activePersonaId = getActivePersonaId();
@@ -343,13 +349,14 @@
         isLoadingContainer = true;
         loadProgress = 0;
 
-        const unsub = onC2WEvent("c2w:progress", (data: any) => {
+        const rt = C2WRuntime.getInstance(sessionId || "default");
+        const unsub = rt.onEvent("c2w:progress", (data: any) => {
             loadProgress = data.percent;
         });
 
         try {
-            await loadContainer(imageId);
-            containerStatus = getContainerStatus();
+            await rt.loadContainer(imageId);
+            refreshStatus();
         } catch (e: any) {
             alert(`Failed to load container: ${e.message}`);
         } finally {
@@ -362,13 +369,14 @@
         isLoadingContainer = true;
         loadProgress = 0;
 
-        const unsub = onC2WEvent("c2w:progress", (data: any) => {
+        const rt = C2WRuntime.getInstance(sessionId || "default");
+        const unsub = rt.onEvent("c2w:progress", (data: any) => {
             loadProgress = data.percent;
         });
 
         try {
-            await swapContainer(imageId);
-            containerStatus = getContainerStatus();
+            await rt.swapContainer(imageId);
+            refreshStatus();
         } catch (e: any) {
             alert(`Failed to swap container: ${e.message}`);
         } finally {

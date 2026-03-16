@@ -26,7 +26,8 @@ import {
     executeCommand as c2wExecuteCommand,
     getContainerOS,
     getContainerArch,
-    getContainerStatus,
+    getContainerStatusForSession,
+    getContainerImages,
 } from './container2wasm-runtime';
 
 let _wasiContainer: WASIContainer | null = null;
@@ -454,9 +455,9 @@ function formatShellResult(result: CommandResult): string {
  * Get container info — returns container2wasm status if active,
  * otherwise falls back to BusyBox WASI container info.
  */
-export async function getContainerInfo(): Promise<any> {
+export async function getContainerInfo(sessionId: string = 'default'): Promise<any> {
     if (isContainerReady()) {
-        const status = getContainerStatus();
+        const status = getContainerStatusForSession(sessionId);
         return {
             ...status,
             type: 'container2wasm',

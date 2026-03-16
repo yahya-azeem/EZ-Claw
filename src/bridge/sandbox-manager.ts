@@ -16,7 +16,7 @@ import { WASIContainer, detectArchitecture, type CommandResult } from './wasi-co
 import {
     isContainerReady,
     executeCommand as c2wExecute,
-    getContainerStatus,
+    getContainerStatusForSession,
     C2WRuntime,
 } from './container2wasm-runtime';
 
@@ -281,22 +281,35 @@ class NativeCLISandbox {
     }
 }
 
-// ── Sandbox Manager (Orchestrator) ────────────────────────────────
-
 export class SandboxManager {
+    private static instances = new Map<string, SandboxManager>();
+
+    /** Get or create a SandboxManager for a specific session. */
+    static getInstance(sessionId: string = 'default'): SandboxManager {
+        let instance = this.instances.get(sessionId);
+        if (!instance) {
+            const rt = C2WRuntime.getInstance(sessionId);
+            instance = new SandboxManager({ tier: 'container2wasm', enabled: true }, rt, sessionId);
+            this.instances.set(sessionId, instance);
+        }
+        return instance;
+    }
+
     private config: SandboxConfig;
     private wasi: WasiSandbox;
     private native: NativeCLISandbox;
     private c2w: C2WRuntime | null = null;
+    private sessionId: string;
     private outputListeners: ((line: string) => void)[] = [];
     private commandHistory: AuditEntry[] = [];
     private readonly MAX_HISTORY = 500;
 
-    constructor(config: Partial<SandboxConfig> = {}, c2w?: C2WRuntime) {
+    constructor(config: Partial<SandboxConfig> = {}, c2w?: C2WRuntime, sessionId: string = 'default') {
         this.config = { ...DEFAULT_CONFIG, ...config };
         this.wasi = new WasiSandbox(this.config);
         this.native = new NativeCLISandbox(this.config);
         this.c2w = c2w || null;
+        this.sessionId = sessionId;
 
         // Forward output from isolated C2W runtime
         if (this.c2w) {
@@ -437,11 +450,48 @@ export class SandboxManager {
         return this.native.isConnected;
     }
 
+    /**
+     * Boot the container2wasm Linux container.
+     * Downloads the WASM image (~60MB) and starts the emulated Linux kernel.
+     * Must be called before container2wasm tier commands will work.
+     */
+    async bootContainer(imageId?: string): Promise<void> {
+        if (!this.c2w) {
+            this.c2w = C2WRuntime.getInstance(this.sessionId);
+            // Forward output events
+            this.c2w.onEvent('c2w:output', (evt: any) => {
+                if (evt?.data) this.emit(evt.data);
+            });
+        }
+        if (this.c2w.isReady()) return; // Already booted
+        await this.c2w.loadContainer(imageId);
+    }
+
+    /** Check if the container2wasm runtime is booted and ready. */
+    get isContainerBooted(): boolean {
+        return this.c2w?.isReady() ?? false;
+    }
+
+    /**
+     * Subscribe to C2WRuntime events (c2w:loading, c2w:ready, c2w:progress, c2w:error).
+     * Returns an unsubscribe function.
+     */
+    onC2WEvent(event: import('./container2wasm-runtime').C2WEvent, fn: (data?: any) => void): () => void {
+        if (!this.c2w) {
+            this.c2w = C2WRuntime.getInstance(this.sessionId);
+            // Forward output events
+            this.c2w.onEvent('c2w:output', (evt: any) => {
+                if (evt?.data) this.emit(evt.data);
+            });
+        }
+        return this.c2w.onEvent(event, fn);
+    }
+
     /** Get sandbox status info. */
     getStatus(): { tier: SandboxTier; available: boolean; info: string } {
         switch (this.config.tier) {
             case 'container2wasm': {
-                const status = getContainerStatus();
+                const status = getContainerStatusForSession(this.sessionId);
                 if (status.ready) {
                     return { tier: 'container2wasm', available: true, info: `${status.os} Linux (${status.arch}) via container2wasm` };
                 }

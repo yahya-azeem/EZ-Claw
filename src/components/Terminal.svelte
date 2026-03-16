@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount, tick } from "svelte";
+    import { onMount, onDestroy, tick } from "svelte";
     import {
         SandboxManager,
         type SandboxTier,
@@ -20,17 +20,21 @@
     let inputText = $state("");
     let currentTier: SandboxTier = $state("container2wasm");
     let isExecuting = $state(false);
+    let containerBooting = $state(false);
+    let containerReady = $state(false);
     let nativeUrl = $state("ws://localhost:9229");
     let showTierMenu = $state(false);
     let terminalEl: HTMLDivElement | undefined = $state();
     let inputEl: HTMLInputElement | undefined = $state();
 
     let manager: SandboxManager | null = null;
+    let cleanups: (() => void)[] = [];
 
     onMount(() => {
-        manager = new SandboxManager({ tier: "container2wasm", enabled: true });
+        // Use the singleton so we get a C2WRuntime attached
+        manager = SandboxManager.getInstance();
 
-        // Listen for output
+        // Listen for terminal output from sandbox
         manager.onOutput((line) => {
             if (line.includes("\x1b[31m")) {
                 lines = [
@@ -40,7 +44,62 @@
             } else {
                 lines = [...lines, { text: line, type: "stdout" }];
             }
+            scrollToBottom();
         });
+
+        // Subscribe to container lifecycle events
+        const offProgress = manager.onC2WEvent("c2w:progress", (data: any) => {
+            if (data?.loaded && data?.total) {
+                const pct = Math.round((data.loaded / data.total) * 100);
+                const mb = (data.loaded / 1024 / 1024).toFixed(1);
+                const totalMb = (data.total / 1024 / 1024).toFixed(1);
+                // Update last progress line instead of appending
+                const progressIdx = lines.findIndex(
+                    (l) => l.type === "info" && l.text.startsWith("⏳ Downloading"),
+                );
+                const progressLine = {
+                    text: `⏳ Downloading container... ${mb}MB / ${totalMb}MB (${pct}%)`,
+                    type: "info" as const,
+                };
+                if (progressIdx >= 0) {
+                    lines = lines.map((l, i) =>
+                        i === progressIdx ? progressLine : l,
+                    );
+                } else {
+                    lines = [...lines, progressLine];
+                }
+                scrollToBottom();
+            }
+        });
+        cleanups.push(offProgress);
+
+        const offReady = manager.onC2WEvent("c2w:ready", () => {
+            containerBooting = false;
+            containerReady = true;
+            lines = [
+                ...lines,
+                {
+                    text: "✅ Linux container ready! Full Alpine Linux sandbox active.",
+                    type: "info",
+                },
+                { text: "", type: "info" },
+            ];
+            scrollToBottom();
+        });
+        cleanups.push(offReady);
+
+        const offError = manager.onC2WEvent("c2w:error", (data: any) => {
+            containerBooting = false;
+            lines = [
+                ...lines,
+                {
+                    text: `❌ Container error: ${data?.error || "Unknown error"}. Falling back to BusyBox shell.`,
+                    type: "stderr",
+                },
+            ];
+            scrollToBottom();
+        });
+        cleanups.push(offError);
 
         // Welcome message
         lines = [
@@ -51,6 +110,42 @@
             },
             { text: "", type: "info" },
         ];
+
+        // Auto-boot the container
+        if (!manager.isContainerBooted) {
+            containerBooting = true;
+            lines = [
+                ...lines,
+                {
+                    text: "🐧 Booting Alpine Linux container...",
+                    type: "info",
+                },
+            ];
+            manager.bootContainer().catch((err) => {
+                containerBooting = false;
+                lines = [
+                    ...lines,
+                    {
+                        text: `❌ Failed to boot container: ${err.message}. Using BusyBox fallback.`,
+                        type: "stderr",
+                    },
+                ];
+            });
+        } else {
+            containerReady = true;
+            lines = [
+                ...lines,
+                {
+                    text: "✅ Linux container already running.",
+                    type: "info",
+                },
+            ];
+        }
+    });
+
+    onDestroy(() => {
+        for (const cleanup of cleanups) cleanup();
+        cleanups = [];
     });
 
     function scrollToBottom() {
@@ -107,6 +202,26 @@
             { text: `Switched to ${status.info}`, type: "info" },
         ];
 
+        if (tier === "container2wasm" && !manager.isContainerBooted) {
+            containerBooting = true;
+            lines = [
+                ...lines,
+                { text: "🐧 Booting Alpine Linux container...", type: "info" },
+            ];
+            try {
+                await manager.bootContainer();
+            } catch (err: any) {
+                containerBooting = false;
+                lines = [
+                    ...lines,
+                    {
+                        text: `❌ Failed to boot: ${err.message}. Using BusyBox fallback.`,
+                        type: "stderr",
+                    },
+                ];
+            }
+        }
+
         if (tier === "native" && !manager.isNativeConnected) {
             lines = [
                 ...lines,
@@ -134,6 +249,7 @@
     }
 
     function handleKeydown(e: KeyboardEvent) {
+        if (e === null) return;
         if (e.key === "Enter") {
             e.preventDefault();
             executeCommand();
@@ -157,6 +273,9 @@
                             onclick={() => (showTierMenu = !showTierMenu)}
                         >
                             {currentTier.toUpperCase()}
+                            {#if currentTier === "container2wasm"}
+                                <span class="status-dot" class:ready={containerReady} class:booting={containerBooting}></span>
+                            {/if}
                             <svg
                                 width="12"
                                 height="12"
@@ -411,5 +530,25 @@
 
     .terminal-input::placeholder {
         color: #484f58;
+    }
+
+    .status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #484f58;
+        display: inline-block;
+    }
+    .status-dot.ready {
+        background: #3fb950;
+        box-shadow: 0 0 4px #3fb950;
+    }
+    .status-dot.booting {
+        background: #d29922;
+        animation: blink 1s ease-in-out infinite;
+    }
+    @keyframes blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
     }
 </style>

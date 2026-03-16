@@ -42,9 +42,21 @@ export type C2WEvent =
 
 type Listener = (data?: any) => void;
 
-// ── State ────────────────────────────────────────────────────────
-
 export class C2WRuntime {
+    private static instances = new Map<string, C2WRuntime>();
+
+    /** Get or create a runtime for a specific session ID to ensure isolation. */
+    static getInstance(sessionId: string = 'default'): C2WRuntime {
+        let instance = this.instances.get(sessionId);
+        if (!instance) {
+            instance = new C2WRuntime();
+            this.instances.set(sessionId, instance);
+        }
+        return instance;
+    }
+
+    private worker: Worker | null = null;
+    private commandPromise: { resolve: (res: C2WCommandResult) => void; reject: (err: any) => void } | null = null;
     private wasmModule: WebAssembly.Module | null = null;
     private wasmInstance: WebAssembly.Instance | null = null;
     private containerReady = false;
@@ -56,6 +68,50 @@ export class C2WRuntime {
     private eventListeners = new Map<C2WEvent, Set<Listener>>();
 
     constructor() {}
+
+    private initWorker() {
+        if (this.worker) return;
+        
+        const base = (typeof import.meta !== 'undefined' && import.meta.env?.BASE_URL) || './';
+        const workerUrl = `${base}c2w-worker.js`.replace(/\/+/g, '/');
+        
+        console.log(`[EZ-Claw] Initializing C2W Worker at ${workerUrl}`);
+        this.worker = new Worker(workerUrl, { type: 'module' });
+
+        this.worker.onmessage = (e) => {
+            const { type, payload } = e.data;
+            switch (type) {
+                case 'ready':
+                    this.containerReady = true;
+                    this.emit('c2w:ready', { image: this.activeImage });
+                    break;
+                case 'progress':
+                    this.emit('c2w:progress', payload);
+                    break;
+                case 'output':
+                    this.emit('c2w:output', payload);
+                    break;
+                case 'result':
+                    if (this.commandPromise) {
+                        this.commandPromise.resolve(payload);
+                        this.commandPromise = null;
+                    }
+                    break;
+                case 'error':
+                    this.emit('c2w:error', { error: payload.message, image: this.activeImage });
+                    if (this.commandPromise) {
+                        this.commandPromise.reject(new Error(payload.message));
+                        this.commandPromise = null;
+                    }
+                    break;
+            }
+        };
+
+        this.worker.onerror = (e) => {
+            console.error('[EZ-Claw] Worker error:', e);
+            this.emit('c2w:error', { error: 'Worker failed to load or crashed', image: this.activeImage });
+        };
+    }
 
     private emit(event: C2WEvent, data?: any): void {
         this.eventListeners.get(event)?.forEach((fn) => fn(data));
@@ -73,111 +129,36 @@ export class C2WRuntime {
         const images = getContainerImages();
         const image = imageId
             ? images.find((i) => i.id === imageId)
-            : images[0]; // Default to first (Alpine)
+            : images[0];
 
         if (!image) throw new Error(`Container image not found: ${imageId}`);
 
+        this.activeImage = image;
         this.emit('c2w:loading', { image });
         this.containerReady = false;
 
-        try {
-            // Fetch the WASM blob with progress tracking
-            const response = await fetch(image.wasmUrl);
-            if (!response.ok) {
-                throw new Error(`Failed to fetch container WASM: ${response.status} ${response.statusText}`);
-            }
-
-            const contentLength = Number(response.headers.get('content-length') || 0);
-            const reader = response.body?.getReader();
-
-            if (reader && contentLength > 0) {
-                // Stream with progress
-                const chunks: Uint8Array[] = [];
-                let received = 0;
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    chunks.push(value);
-                    received += value.length;
-                    this.emit('c2w:progress', {
-                        loaded: received,
-                        total: contentLength,
-                        percent: Math.round((received / contentLength) * 100),
-                    });
-                }
-
-                const blob = new Uint8Array(received);
-                let offset = 0;
-                for (const chunk of chunks) {
-                    blob.set(chunk, offset);
-                    offset += chunk.length;
-                }
-
-                this.wasmModule = await WebAssembly.compile(blob);
-            } else {
-                // Fallback: no streaming
-                const buffer = await response.arrayBuffer();
-                this.wasmModule = await WebAssembly.compile(buffer);
-            }
-
-            // Create WASI imports using our shim
-            const wasiImports = this.createWASIImports(image);
-
-            // Instantiate with WASI imports
-            this.wasmInstance = await WebAssembly.instantiate(this.wasmModule, {
-                wasi_snapshot_preview1: wasiImports,
-                wasi_unstable: wasiImports,
-            });
-
-            this.activeImage = image;
-            this.containerReady = true;
-            localStorage.setItem(ACTIVE_IMAGE_KEY, image.id);
-
-            this.emit('c2w:ready', { image });
-            console.log(`[EZ-Claw] Container loaded: ${image.name} (${image.arch})`);
-
-            // Start the container's _start function (boots Linux kernel)
-            try {
-                const startFn = this.wasmInstance.exports._start as Function;
-                if (startFn) {
-                    // Run in a microtask so it doesn't block
-                    queueMicrotask(() => {
-                        try {
-                            if (startFn) startFn();
-                        } catch { /* container exited */ }
-                    });
-                }
-            } catch {
-                // Some containers don't have _start — they're command-based
-            }
-        } catch (err: any) {
-            // Provide actionable error messages
-            let userMessage = err.message;
-            if (err.message?.includes('404')) {
-                userMessage = `Container blob not found at "${image.wasmUrl}". The container needs to be built first.`;
-            } else if (err.message?.includes('WebAssembly.compile') || err.message?.includes('extends past end')) {
-                userMessage = `Container blob is corrupt or truncated.`;
-            }
-            this.emit('c2w:error', { error: userMessage, image });
-            throw new Error(userMessage);
-        }
+        this.initWorker();
+        this.worker!.postMessage({ type: 'load', payload: { image } });
     }
 
     async swapContainer(imageId: string): Promise<void> {
-        if (this.containerReady) this.stopContainer();
+        this.stopContainer();
         await this.loadContainer(imageId);
         this.emit('c2w:swapped', { imageId });
     }
 
     stopContainer(): void {
-        this.wasmInstance = null;
-        this.wasmModule = null;
+        if (this.worker) {
+            this.worker.terminate();
+            this.worker = null;
+        }
         this.containerReady = false;
+        this.activeImage = null;
         this.stdinBuffer = [];
         this.stdoutBuffer = '';
         this.stderrBuffer = '';
         this.commandResolve = null;
+        this.commandPromise = null;
     }
 
     isReady(): boolean { return this.containerReady; }
@@ -186,44 +167,13 @@ export class C2WRuntime {
     // ── Command Execution ────────────────────────────────────────────
 
     async execute(command: string, timeoutMs: number = 30000): Promise<C2WCommandResult> {
-        if (!this.containerReady || !this.wasmInstance) {
+        if (!this.containerReady || !this.worker) {
             throw new Error('Container not ready. Call loadContainer() first.');
         }
 
-        const startTime = performance.now();
-        this.stdinBuffer.push(command + '\n');
-
-        return new Promise<C2WCommandResult>((resolve) => {
-            this.stdoutBuffer = '';
-            this.stderrBuffer = '';
-
-            const timer = setTimeout(() => {
-                this.commandResolve = null;
-                resolve({
-                    stdout: this.stdoutBuffer,
-                    stderr: this.stderrBuffer || 'Command timed out',
-                    exit_code: 124,
-                    duration_ms: performance.now() - startTime,
-                });
-            }, timeoutMs);
-
-            this.commandResolve = (result) => {
-                clearTimeout(timer);
-                resolve(result);
-            };
-
-            // Polling fallback
-            setTimeout(() => {
-                if (this.commandResolve) {
-                    this.commandResolve({
-                        stdout: this.stdoutBuffer,
-                        stderr: this.stderrBuffer,
-                        exit_code: 0,
-                        duration_ms: performance.now() - startTime,
-                    });
-                    this.commandResolve = null;
-                }
-            }, 500);
+        return new Promise<C2WCommandResult>((resolve, reject) => {
+            this.commandPromise = { resolve, reject };
+            this.worker!.postMessage({ type: 'execute', payload: { command, timeoutMs } });
         });
     }
 
@@ -508,16 +458,17 @@ export function getContainerArch(): ContainerArch {
     return defaultRuntime.getActiveImage()?.arch || detectArch();
 }
 
-export function getContainerStatus(): {
+export function getContainerStatusForSession(sessionId: string | null): {
     ready: boolean;
     image: string | null;
     os: string;
     arch: ContainerArch;
 } {
+    const rt = C2WRuntime.getInstance(sessionId || "default");
     return {
-        ready: defaultRuntime.isReady(),
-        image: defaultRuntime.getActiveImage()?.name || null,
-        os: defaultRuntime.getActiveImage()?.os || 'none',
-        arch: defaultRuntime.getActiveImage()?.arch || detectArch(),
+        ready: rt.isReady(),
+        image: rt.getActiveImage()?.name || null,
+        os: rt.getActiveImage()?.os || 'none',
+        arch: rt.getActiveImage()?.arch || detectArch(),
     };
 }

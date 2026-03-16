@@ -1,0 +1,508 @@
+﻿
+> ez-claw@0.1.0 build
+> vite build
+
+[36mvite v6.4.1 [32mbuilding for production...[36m[39m
+transforming...
+node.exe : 10:27:17 
+AM 
+[vite-plugin-svelte] s
+rc/components/Sidebar.
+svelte:188:6 Visible, 
+non-interactive 
+elements with a click 
+event must be 
+accompanied by a 
+keyboard event 
+handler. Consider 
+whether an 
+interactive element 
+such as `<button 
+type="button">` or 
+`<a>` might be more 
+appropriate
+At line:1 char:1
++ & "C:\Program Files\
+nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo 
+...
++ ~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
+~~~~~
+    + CategoryInfo    
+          : NotSpeci  
+  fied: (10:27:17 A   
+ M [vi...ore appro    
+priate:String) []    
+, RemoteException
+    + FullyQualifiedE 
+   rrorId : NativeCo  
+  mmandError
+ 
+https://svelte.dev/e/a
+11y_click_events_have_
+key_events
+186:     {#each 
+sessions as session 
+(session.id)}
+187:       <!-- 
+svelte-ignore a11y_no_
+static_element_interac
+tions -->
+188:       <div
+                ^
+189:         
+class="session-item"
+190:         class:act
+ive={session.id === 
+activeSessionId}
+10:27:17 AM 
+[vite-plugin-svelte] s
+rc/components/Settings
+.svelte:29:29 This 
+reference only 
+captures the initial 
+value of `provider`. 
+Did you mean to 
+reference it inside a 
+closure instead?
+https://svelte.dev/e/s
+tate_referenced_locall
+y
+27:     $props();
+28: 
+29:   let 
+localProvider = 
+$state(provider);
+                      
+                   ^
+30:   let localModel 
+= $state(model);
+31:   let localApiKey 
+= $state(apiKey);
+10:27:17 AM 
+[vite-plugin-svelte] s
+rc/components/Settings
+.svelte:30:26 This 
+reference only 
+captures the initial 
+value of `model`. Did 
+you mean to reference 
+it inside a closure 
+instead?
+https://svelte.dev/e/s
+tate_referenced_locall
+y
+28: 
+29:   let 
+localProvider = 
+$state(provider);
+30:   let localModel 
+= $state(model);
+                      
+             ^
+31:   let localApiKey 
+= $state(apiKey);
+32:   let localTemp = 
+$state(temperature);
+10:27:17 AM 
+[vite-plugin-svelte] s
+rc/components/Settings
+.svelte:31:27 This 
+reference only 
+captures the initial 
+value of `apiKey`. 
+Did you mean to 
+reference it inside a 
+closure instead?
+https://svelte.dev/e/s
+tate_referenced_locall
+y
+29:   let 
+localProvider = 
+$state(provider);
+30:   let localModel 
+= $state(model);
+31:   let localApiKey 
+= $state(apiKey);
+                      
+               ^
+32:   let localTemp = 
+$state(temperature);
+33:   let localApiUrl 
+= $state(apiUrl);
+10:27:17 AM 
+[vite-plugin-svelte] s
+rc/components/Settings
+.svelte:32:25 This 
+reference only 
+captures the initial 
+value of 
+`temperature`. Did 
+you mean to reference 
+it inside a closure 
+instead?
+https://svelte.dev/e/s
+tate_referenced_locall
+y
+30:   let localModel 
+= $state(model);
+31:   let localApiKey 
+= $state(apiKey);
+32:   let localTemp = 
+$state(temperature);
+                      
+                  ^
+33:   let localApiUrl 
+= $state(apiUrl);
+34:   let showApiKey 
+= $state(false);
+10:27:17 AM 
+[vite-plugin-svelte] s
+rc/components/Settings
+.svelte:33:27 This 
+reference only 
+captures the initial 
+value of `apiUrl`. 
+Did you mean to 
+reference it inside a 
+closure instead?
+https://svelte.dev/e/s
+tate_referenced_locall
+y
+31:   let localApiKey 
+= $state(apiKey);
+32:   let localTemp = 
+$state(temperature);
+33:   let localApiUrl 
+= $state(apiUrl);
+                      
+               ^
+34:   let showApiKey 
+= $state(false);
+35:   let 
+exportStatus = 
+$state("");
+10:27:17 AM 
+[vite-plugin-svelte] s
+rc/components/Terminal
+.svelte:146:8 
+Elements with the 
+'dialog' interactive 
+role must have a 
+tabindex value
+https://svelte.dev/e/a
+11y_interactive_suppor
+ts_focus
+144: {#if isOpen}
+145:     <div class="t
+erminal-overlay" 
+onclick={onClose} 
+role="presentation">
+146:         <div
+                  ^
+147:             
+class="terminal-panel 
+glass-elevated"
+148:             
+onclick={(e) => 
+e.stopPropagation()}
+10:27:17 AM 
+[vite-plugin-svelte] s
+rc/components/Terminal
+.svelte:146:8 
+Visible, 
+non-interactive 
+elements with a click 
+event must be 
+accompanied by a 
+keyboard event 
+handler. Consider 
+whether an 
+interactive element 
+such as `<button 
+type="button">` or 
+`<a>` might be more 
+appropriate
+https://svelte.dev/e/a
+11y_click_events_have_
+key_events
+144: {#if isOpen}
+145:     <div class="t
+erminal-overlay" 
+onclick={onClose} 
+role="presentation">
+146:         <div
+                  ^
+147:             
+class="terminal-panel 
+glass-elevated"
+148:             
+onclick={(e) => 
+e.stopPropagation()}
+10:27:17 AM 
+[vite-plugin-svelte] s
+rc/components/Channels
+Panel.svelte:142:8 
+Elements with the 
+'dialog' interactive 
+role must have a 
+tabindex value
+https://svelte.dev/e/a
+11y_interactive_suppor
+ts_focus
+140: {#if isOpen}
+141:     <div class="c
+hannels-overlay" 
+onclick={onClose} 
+role="presentation">
+142:         <div
+                  ^
+143:             
+class="channels-panel 
+glass-elevated"
+144:             
+onclick={(e) => 
+e.stopPropagation()}
+10:27:17 AM 
+[vite-plugin-svelte] s
+rc/components/Channels
+Panel.svelte:142:8 
+Visible, 
+non-interactive 
+elements with a click 
+event must be 
+accompanied by a 
+keyboard event 
+handler. Consider 
+whether an 
+interactive element 
+such as `<button 
+type="button">` or 
+`<a>` might be more 
+appropriate
+https://svelte.dev/e/a
+11y_click_events_have_
+key_events
+140: {#if isOpen}
+141:     <div class="c
+hannels-overlay" 
+onclick={onClose} 
+role="presentation">
+142:         <div
+                  ^
+143:             
+class="channels-panel 
+glass-elevated"
+144:             
+onclick={(e) => 
+e.stopPropagation()}
+10:27:17 AM 
+[vite-plugin-svelte] s
+rc/components/Channels
+Panel.svelte:262:28 A 
+form label must be 
+associated with a 
+control
+https://svelte.dev/e/a
+11y_label_has_associat
+ed_control
+260: 
+261:                  
+       <div 
+class="form-group">
+262:                  
+           <label>Plat
+form</label>
+                      
+                      
+            ^
+263:                  
+           <div class=
+"platform-selector">
+264:                  
+               <button
+10:27:17 AM 
+[vite-plugin-svelte] s
+rc/components/Channels
+Panel.svelte:289:28 A 
+form label must be 
+associated with a 
+control
+https://svelte.dev/e/a
+11y_label_has_associat
+ed_control
+287: 
+288:                  
+       <div 
+class="form-group">
+289:                  
+           <label>Bot 
+Name</label>
+                      
+                      
+            ^
+290:                  
+           <input
+291:                  
+               
+type="text"
+10:27:17 AM 
+[vite-plugin-svelte] s
+rc/components/Channels
+Panel.svelte:298:28 A 
+form label must be 
+associated with a 
+control
+https://svelte.dev/e/a
+11y_label_has_associat
+ed_control
+296: 
+297:                  
+       <div 
+class="form-group">
+298:                  
+           <label>
+                      
+                   ^
+299:                  
+               {#if 
+addType === 
+"telegram"}Bot Token 
+(from
+300:                  
+                   
+@BotFather)
+10:27:17 AM 
+[vite-plugin-svelte] s
+rc/components/Channels
+Panel.svelte:317:32 A 
+form label must be 
+associated with a 
+control
+https://svelte.dev/e/a
+11y_label_has_associat
+ed_control
+315:                  
+       {#if addType 
+=== "slack"}
+316:                  
+           <div 
+class="form-group">
+317:                  
+               
+<label>Bot OAuth 
+Token 
+(xoxb-...)</label>
+                      
+                      
+                      
+            ^
+318:                  
+               <input
+319:                  
+                   
+type="password"
+[32mΓ£ô[39m 162 modules transformed.
+[31mΓ£ù[39m Build 
+failed in 2.73s
+[31merror during 
+build:
+[31msrc/components/Wo
+rkspacePanel.svelte 
+(35:8): 
+"registerImage" is 
+not exported by "src/b
+ridge/container2wasm-r
+untime.ts", imported 
+by "src/components/Wor
+kspacePanel.svelte".[
+31m
+file: [36mC:/Users/sh
+ama/Documents/Quick/EZ
+-Claw/src/components/W
+orkspacePanel.svelte:3
+5:8[31m
+[33m
+33:         
+loadContainer,
+34:         
+isContainerReady,
+35:         
+registerImage,
+            ^
+36:         
+removeImage,
+37:         
+detectArch,
+[31m
+    at getRollupError 
+(file:///C:/Users/sham
+a/Documents/Quick/EZ-C
+law/node_modules/rollu
+p/dist/es/shared/parse
+Ast.js:402:41)
+    at error (file:///
+C:/Users/shama/Documen
+ts/Quick/EZ-Claw/node_
+modules/rollup/dist/es
+/shared/parseAst.js:39
+8:42)
+    at Module.error (f
+ile:///C:/Users/shama/
+Documents/Quick/EZ-Cla
+w/node_modules/rollup/
+dist/es/shared/node-en
+try.js:17040:16)
+    at 
+Module.traceVariable (
+file:///C:/Users/shama
+/Documents/Quick/EZ-Cl
+aw/node_modules/rollup
+/dist/es/shared/node-e
+ntry.js:17452:29)
+    at ModuleScope.fin
+dVariable (file:///C:/
+Users/shama/Documents/
+Quick/EZ-Claw/node_mod
+ules/rollup/dist/es/sh
+ared/node-entry.js:150
+70:39)
+    at FunctionScope.f
+indVariable (file:///C
+:/Users/shama/Document
+s/Quick/EZ-Claw/node_m
+odules/rollup/dist/es/
+shared/node-entry.js:5
+673:38)
+    at FunctionBodySco
+pe.findVariable (file:
+///C:/Users/shama/Docu
+ments/Quick/EZ-Claw/no
+de_modules/rollup/dist
+/es/shared/node-entry.
+js:5673:38)
+    at FunctionScope.f
+indVariable (file:///C
+:/Users/shama/Document
+s/Quick/EZ-Claw/node_m
+odules/rollup/dist/es/
+shared/node-entry.js:5
+673:38)
+    at FunctionBodySco
+pe.findVariable (file:
+///C:/Users/shama/Docu
+ments/Quick/EZ-Claw/no
+de_modules/rollup/dist
+/es/shared/node-entry.
+js:5673:38)
+    at TrackingScope.f
+indVariable (file:///C
+:/Users/shama/Document
+s/Quick/EZ-Claw/node_m
+odules/rollup/dist/es/
+shared/node-entry.js:5
+673:38)[39m
+
