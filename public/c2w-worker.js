@@ -40,6 +40,9 @@ async function handleLoad(payload) {
         sharedStdinBuffer = sharedBuffer;
         sharedStdinUint8 = new Uint8Array(sharedStdinBuffer, 8);
         sharedStdinPointers = new Int32Array(sharedStdinBuffer, 0, 2);
+        emitMsg('log', { message: 'SharedArrayBuffer input initialized' });
+    } else {
+        emitMsg('log', { message: 'SharedArrayBuffer NOT supported, using postMessage fallback' });
     }
 
     const response = await fetch(image.wasmUrl);
@@ -56,7 +59,8 @@ async function handleLoad(payload) {
             const { done, value } = await reader.read();
             if (done) break;
             chunks.push(value); received += value.length;
-            emitMsg('progress', { loaded: received, total: contentLength });
+            const pct = contentLength > 0 ? Math.min(100, Math.round((received / contentLength) * 100)) : 0;
+            emitMsg('progress', { loaded: received, total: contentLength, percent: pct });
         }
         bytes = new Uint8Array(received);
         let offset = 0;
@@ -67,6 +71,7 @@ async function handleLoad(payload) {
 
     const wasi = createWasiShim(image);
     const result = await WebAssembly.instantiate(bytes, { wasi_snapshot_preview1: wasi, wasi_unstable: wasi });
+    wasmInstance = result.instance;
     emitMsg('log', { message: 'WASM Instance created, signaling ready' });
     emitMsg('ready');
 

@@ -86,7 +86,7 @@
         // Progress events
         const offProgress = manager.onC2WEvent("c2w:progress", (data: any) => {
             if (data?.loaded && data?.total && term) {
-                const pct = Math.round((data.loaded / data.total) * 100);
+                const pct = data.percent ?? Math.min(100, Math.round((data.loaded / data.total) * 100));
                 const mb = (data.loaded / 1024 / 1024).toFixed(1);
                 const totalMb = (data.total / 1024 / 1024).toFixed(1);
                 term.write(`\r\x1b[K⏳ Downloading container... ${mb}MB / ${totalMb}MB (${pct}%)`);
