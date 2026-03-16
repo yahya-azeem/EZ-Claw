@@ -26,7 +26,7 @@
     async function initTerminal() {
         if (!termContainer || term) return;
 
-        console.log(`[EZ-Claw] Initializing TerminalView (v2.2) for session: ${sessionId}`);
+        console.log(`[EZ-Claw] Initializing TerminalView (v2.3) | isolated=${window.crossOriginIsolated}`);
 
         term = new Terminal({
             cursorBlink: true,
@@ -67,7 +67,7 @@
             }
         });
 
-        term.writeln("\x1b[1;34m🦀 EZ-TERM 2.2 — Secure Sandbox\x1b[0m");
+        term.writeln("\x1b[1;34m🦀 EZ-TERM 2.3 — Secure Sandbox\x1b[0m");
         term.writeln("\x1b[2mInteractive Alpine Linux session active. Type directly below.\x1b[0m\n");
     }
 

@@ -1,5 +1,5 @@
 /**
- * C2W Web Worker — background Linux kernel execution.
+ * C2W Web Worker v3 — background Linux kernel execution.
  * 
  * Served from /public to avoid Vite transformation issues.
  */
@@ -78,11 +78,12 @@ async function handleLoad(payload) {
     try {
         const _start = wasmInstance.exports._start;
         if (_start) {
-            emitMsg('log', { message: 'Starting WASM kernel loop...' });
+            emitMsg('log', { message: `Starting WASM kernel loop with crossOriginIsolated=${self.crossOriginIsolated}` });
             _start();
         }
     } catch (e) {
-        emitMsg('log', { message: `WASM execution finished or failed: ${e.message}` });
+        emitMsg('error', { message: `WASM KERNEL TRAP: ${e.message}` });
+        emitMsg('log', { message: `Stack: ${e.stack}` });
     }
 }
 
@@ -100,6 +101,7 @@ function createWasiShim(image) {
         'LANG=C.UTF-8', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
     ];
     const args = ['/bin/sh'];
+    emitMsg('log', { message: `WASI Config: args=${JSON.stringify(args)}, envCount=${env.length}` });
     const getMem = () => wasmInstance.exports.memory;
 
     return {
@@ -128,30 +130,41 @@ function createWasiShim(image) {
 
             // ── Priority 1: SharedArrayBuffer (Synchronous / Atomic) ──
             if (sharedStdinPointers && sharedStdinUint8) {
-                let totalRead = 0;
-                for (let i = 0; i < iovsLen; i++) {
-                    const ptr = view.getUint32(iovs + i * 8, true);
-                    const len = view.getUint32(iovs + i * 8 + 4, true);
-                    
-                    for (let j = 0; j < len; j++) {
-                        let read = Atomics.load(sharedStdinPointers, 0);
-                        let write = Atomics.load(sharedStdinPointers, 1);
+                try {
+                    let totalRead = 0;
+                    for (let i = 0; i < iovsLen; i++) {
+                        const ptr = view.getUint32(iovs + i * 8, true);
+                        const len = view.getUint32(iovs + i * 8 + 4, true);
+                        
+                        for (let j = 0; j < len; j++) {
+                            let read = Atomics.load(sharedStdinPointers, 0);
+                            let write = Atomics.load(sharedStdinPointers, 1);
 
-                        if (read === write) {
-                            if (totalRead > 0) break; // Return what we have
-                            // Wait for data
-                            Atomics.wait(sharedStdinPointers, 1, write);
-                            read = Atomics.load(sharedStdinPointers, 0);
-                            write = Atomics.load(sharedStdinPointers, 1);
+                            if (read === write) {
+                                if (totalRead > 0) break; // Return what we have
+                                // Wait for data - wrap in try-catch because this can trap if not isolated
+                                try {
+                                    Atomics.wait(sharedStdinPointers, 1, write, 100); // 100ms timeout
+                                } catch (atomicErr) {
+                                    // If we can't wait, we break and hope for the next poll
+                                    break;
+                                }
+                                read = Atomics.load(sharedStdinPointers, 0);
+                                write = Atomics.load(sharedStdinPointers, 1);
+                                if (read === write) break; 
+                            }
+
+                            memUint8[ptr + j] = sharedStdinUint8[read];
+                            Atomics.store(sharedStdinPointers, 0, (read + 1) % 1024);
+                            totalRead++;
                         }
-
-                        memUint8[ptr + j] = sharedStdinUint8[read];
-                        Atomics.store(sharedStdinPointers, 0, (read + 1) % 1024);
-                        totalRead++;
+                        if (totalRead > 0) break;
                     }
+                    view.setUint32(nread, totalRead, true);
+                    return 0;
+                } catch (e) {
+                    emitMsg('log', { message: `Atomic fd_read error: ${e.message}` });
                 }
-                view.setUint32(nread, totalRead, true);
-                return 0;
             }
 
             // ── Priority 2: Message Buffer (Fallback) ──
