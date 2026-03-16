@@ -153,6 +153,14 @@ class WasiSandbox {
         }
     }
 
+    sendStdin(data: string): void {
+        if (this.container) {
+            // For WASI container, we just append to the buffer
+            // Future command executions (like a shell loop) might pick it up
+            (this.container as any).stdinBuffer += data;
+        }
+    }
+
     async mountWorkspace(handle: FileSystemDirectoryHandle): Promise<void> {
         const container = await this.getContainer();
         await container.mount('/workspace', handle);
@@ -274,6 +282,12 @@ class NativeCLISandbox {
                 timeoutMs: this.config.timeoutMs,
             }));
         });
+    }
+
+    sendStdin(data: string): void {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ type: 'stdin', data }));
+        }
     }
 
     get isConnected(): boolean {
@@ -468,6 +482,10 @@ export class SandboxManager {
     sendStdin(data: string): void {
         if (this.config.tier === 'container2wasm' && this.c2w) {
             this.c2w.sendStdin(data);
+        } else if (this.config.tier === 'wasi') {
+            this.wasi.sendStdin(data);
+        } else if (this.config.tier === 'native') {
+            this.native.sendStdin(data);
         }
     }
 

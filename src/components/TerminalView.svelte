@@ -60,7 +60,9 @@
         term.focus();
 
         term.onData((data) => {
-            if (manager && containerReady) {
+            if (manager) {
+                // Remove the containerReady guard to allow data to flow to manager
+                // the manager will decide what to do with it based on its current tier.
                 manager.sendStdin(data);
             }
         });
@@ -95,6 +97,7 @@
         const offReady = manager.onC2WEvent("c2w:ready", () => {
             containerReady = true;
             term?.write("\n\r\x1b[1;32m✅ Linux container ready!\x1b[0m\n\n");
+            term?.focus();
         });
         cleanups.push(offReady);
 
