@@ -1,9 +1,11 @@
 <script lang="ts">
     import { onMount, onDestroy, tick } from "svelte";
+    import { Terminal } from "xterm";
+    import { FitAddon } from "xterm-addon-fit";
+    import "xterm/css/xterm.css";
     import {
         SandboxManager,
         type SandboxTier,
-        type ShellResult,
     } from "../bridge/sandbox-manager";
 
     interface Props {
@@ -13,62 +15,84 @@
 
     let { isOpen, onClose }: Props = $props();
 
-    let lines: Array<{
-        text: string;
-        type: "input" | "stdout" | "stderr" | "info";
-    }> = $state([]);
-    let inputText = $state("");
     let currentTier: SandboxTier = $state("container2wasm");
-    let isExecuting = $state(false);
     let containerBooting = $state(false);
     let containerReady = $state(false);
-    let nativeUrl = $state("ws://localhost:9229");
     let showTierMenu = $state(false);
-    let terminalEl: HTMLDivElement | undefined = $state();
-    let inputEl: HTMLInputElement | undefined = $state();
-
+    let terminalContainer: HTMLDivElement | undefined = $state();
+    
     let manager: SandboxManager | null = null;
+    let term: Terminal | null = null;
+    let fitAddon: FitAddon | null = null;
     let cleanups: (() => void)[] = [];
 
-    onMount(() => {
-        // Use the singleton so we get a C2WRuntime attached
-        manager = SandboxManager.getInstance();
+    // Initialize xterm
+    async function initTerminal() {
+        if (!terminalContainer || term) return;
 
-        // Listen for terminal output from sandbox
-        manager.onOutput((line) => {
-            // Strip all ANSI escape codes (both real \x1b[ and bare [ prefixes)
-            const stripped = line.replace(/(\x1b\[|\[)\d*(;\d+)*m/g, "").trim();
-            if (!stripped) return; // Skip empty lines from escape-code-only output
-            const isError = line.includes("\x1b[31m") || line.includes("[31m");
-            lines = [
-                ...lines,
-                { text: stripped, type: isError ? "stderr" : "stdout" },
-            ];
-            scrollToBottom();
+        term = new Terminal({
+            cursorBlink: true,
+            theme: {
+                background: "#0d1117",
+                foreground: "#e6edf3",
+                cursor: "#58a6ff",
+                selectionBackground: "rgba(88, 166, 255, 0.3)",
+                black: "#484f58",
+                red: "#ff7b72",
+                green: "#3fb950",
+                yellow: "#d29922",
+                blue: "#58a6ff",
+                magenta: "#bc8cff",
+                cyan: "#39c5bb",
+                white: "#b1bac4",
+            },
+            fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+            fontSize: 13,
+            lineHeight: 1.4,
+            scrollback: 1000,
+            convertEol: true
         });
 
-        // Subscribe to container lifecycle events
+        fitAddon = new FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(terminalContainer);
+        
+        // Use tick to ensure the DOM is ready before fitting
+        await tick();
+        fitAddon.fit();
+
+        // Connect input
+        term.onData((data) => {
+            if (manager && containerReady) {
+                manager.sendStdin(data);
+            }
+        });
+
+        // Welcome
+        term.writeln("\x1b[1;34m🦀 EZ-Claw Terminal — Secure Sandbox\x1b[0m");
+        term.writeln("\x1b[2mFull Alpine Linux userland with apk package manager.\x1b[0m\n");
+    }
+
+    onMount(async () => {
+        await initTerminal();
+        
+        manager = SandboxManager.getInstance();
+
+        // Proxy output to xterm
+        const offOutput = manager.onOutput((data) => {
+            if (term) term.write(data);
+        });
+        cleanups.push(offOutput);
+
+        // Progress events
         const offProgress = manager.onC2WEvent("c2w:progress", (data: any) => {
-            if (data?.loaded && data?.total) {
+            if (data?.loaded && data?.total && term) {
                 const pct = Math.round((data.loaded / data.total) * 100);
                 const mb = (data.loaded / 1024 / 1024).toFixed(1);
                 const totalMb = (data.total / 1024 / 1024).toFixed(1);
-                // Update last progress line instead of appending
-                const progressIdx = lines.findIndex(
-                    (l) => l.type === "info" && l.text.startsWith("⏳ Downloading"),
-                );
-                const progressLine = {
-                    text: `⏳ Downloading container... ${mb}MB / ${totalMb}MB (${pct}%)`,
-                    type: "info" as const,
-                };
-                if (progressIdx >= 0) {
-                    lines = lines.map((l, i) =>
-                        i === progressIdx ? progressLine : l,
-                    );
-                } else {
-                    lines = [...lines, progressLine];
-                }
-                scrollToBottom();
+                
+                // Clear line and write progress
+                term.write(`\r\x1b[K⏳ Downloading container... ${mb}MB / ${totalMb}MB (${pct}%)`);
             }
         });
         cleanups.push(offProgress);
@@ -76,183 +100,80 @@
         const offReady = manager.onC2WEvent("c2w:ready", () => {
             containerBooting = false;
             containerReady = true;
-            lines = [
-                ...lines,
-                {
-                    text: "✅ Linux container ready! Full Alpine Linux sandbox active.",
-                    type: "info",
-                },
-                { text: "", type: "info" },
-            ];
-            scrollToBottom();
+            if (term) {
+                term.write("\n\r\x1b[1;32m✅ Linux container ready!\x1b[0m\n\n");
+            }
         });
         cleanups.push(offReady);
 
         const offError = manager.onC2WEvent("c2w:error", (data: any) => {
             containerBooting = false;
-            lines = [
-                ...lines,
-                {
-                    text: `❌ Container error: ${data?.error || "Unknown error"}. Falling back to BusyBox shell.`,
-                    type: "stderr",
-                },
-            ];
-            scrollToBottom();
+            if (term) {
+                term.writeln(`\r\n\x1b[1;31m❌ Container error: ${data?.error || "Unknown"}\x1b[0m`);
+            }
         });
         cleanups.push(offError);
 
-        // Welcome message
-        lines = [
-            { text: "🦀 EZ-Claw Terminal — Secure Sandbox", type: "info" },
-            {
-                text: 'Type "help" for available commands. Use tier selector to switch sandbox mode.',
-                type: "info",
-            },
-            { text: "", type: "info" },
-        ];
+        // Update local state from manager
+        const status = manager.getStatus();
+        currentTier = status.tier;
+        containerReady = manager.isContainerBooted;
 
-        // Auto-boot the container
-        if (!manager.isContainerBooted) {
+        // Auto-boot if not running and we are on container tier
+        if (currentTier === "container2wasm" && !manager.isContainerBooted) {
             containerBooting = true;
-            lines = [
-                ...lines,
-                {
-                    text: "🐧 Booting Alpine Linux container...",
-                    type: "info",
-                },
-            ];
+            term?.writeln("🐧 Booting Alpine Linux container...");
             manager.bootContainer().catch((err) => {
                 containerBooting = false;
-                lines = [
-                    ...lines,
-                    {
-                        text: `❌ Failed to boot container: ${err.message}. Using BusyBox fallback.`,
-                        type: "stderr",
-                    },
-                ];
+                term?.writeln(`\r\n\x1b[31mFailed to boot: ${err.message}\x1b[0m`);
             });
-        } else {
-            containerReady = true;
-            lines = [
-                ...lines,
-                {
-                    text: "✅ Linux container already running.",
-                    type: "info",
-                },
-            ];
+        } else if (containerReady) {
+            term?.writeln("\x1b[32m✅ Linux container already running.\x1b[0m\n");
+        }
+
+        // Handle resize
+        const resizeObserver = new ResizeObserver(() => {
+            if (isOpen) {
+                fitAddon?.fit();
+            }
+        });
+        if (terminalContainer) resizeObserver.observe(terminalContainer);
+        cleanups.push(() => resizeObserver.disconnect());
+    });
+
+    // Re-fit when opening modal
+    $effect(() => {
+        if (isOpen && fitAddon) {
+            tick().then(() => fitAddon?.fit());
         }
     });
 
     onDestroy(() => {
         for (const cleanup of cleanups) cleanup();
-        cleanups = [];
+        term?.dispose();
     });
 
-    function scrollToBottom() {
-        tick().then(() => {
-            if (terminalEl) terminalEl.scrollTop = terminalEl.scrollHeight;
-        });
-    }
-
-    async function executeCommand() {
-        const cmd = inputText.trim();
-        if (!cmd || isExecuting || !manager) return;
-
-        lines = [...lines, { text: `$ ${cmd}`, type: "input" }];
-        inputText = "";
-        isExecuting = true;
-
-        // Clear command
-        if (cmd === "clear") {
-            lines = [];
-            isExecuting = false;
-            return;
-        }
-
-        try {
-            const result = await manager.execute(cmd);
-            // Output is emitted via onOutput listener
-            if (result.timedOut) {
-                lines = [
-                    ...lines,
-                    { text: `⏱ Command timed out`, type: "stderr" },
-                ];
-            }
-        } catch (err: any) {
-            lines = [
-                ...lines,
-                { text: `Error: ${err.message}`, type: "stderr" },
-            ];
-        }
-
-        isExecuting = false;
-        scrollToBottom();
-        inputEl?.focus();
-    }
-
     async function changeTier(tier: SandboxTier) {
-        if (!manager) return;
+        if (!manager || !term) return;
         currentTier = tier;
         manager.setTier(tier);
         showTierMenu = false;
 
-        const status = manager.getStatus();
-        lines = [
-            ...lines,
-            { text: `Switched to ${status.info}`, type: "info" },
-        ];
+        const info = manager.getStatus().info;
+        term.writeln(`\n\x1b[1;34m[*] Switched to ${info}\x1b[0m`);
 
         if (tier === "container2wasm" && !manager.isContainerBooted) {
             containerBooting = true;
-            lines = [
-                ...lines,
-                { text: "🐧 Booting Alpine Linux container...", type: "info" },
-            ];
+            containerReady = false;
+            term.writeln("🐧 Booting Alpine Linux container...");
             try {
                 await manager.bootContainer();
             } catch (err: any) {
                 containerBooting = false;
-                lines = [
-                    ...lines,
-                    {
-                        text: `❌ Failed to boot: ${err.message}. Using BusyBox fallback.`,
-                        type: "stderr",
-                    },
-                ];
+                term.writeln(`\x1b[31m❌ Failed to boot: ${err.message}\x1b[0m`);
             }
-        }
-
-        if (tier === "native" && !manager.isNativeConnected) {
-            lines = [
-                ...lines,
-                { text: "Connecting to native CLI companion...", type: "info" },
-            ];
-            try {
-                await manager.connectNative(nativeUrl);
-                lines = [
-                    ...lines,
-                    {
-                        text: "✅ Connected to native CLI companion!",
-                        type: "info",
-                    },
-                ];
-            } catch {
-                lines = [
-                    ...lines,
-                    {
-                        text: "❌ Failed to connect. Install: npm i -g ezclaw-node && ezclaw-node",
-                        type: "stderr",
-                    },
-                ];
-            }
-        }
-    }
-
-    function handleKeydown(e: KeyboardEvent) {
-        if (e === null) return;
-        if (e.key === "Enter") {
-            e.preventDefault();
-            executeCommand();
+        } else if (tier === "container2wasm") {
+            containerReady = true;
         }
     }
 </script>
@@ -263,6 +184,7 @@
             class="terminal-panel glass-elevated"
             onclick={(e) => e.stopPropagation()}
             role="dialog"
+            aria-label="Terminal"
         >
             <div class="terminal-header">
                 <div class="header-left">
@@ -287,71 +209,50 @@
                                 <polyline points="6 9 12 15 18 9" />
                             </svg>
                         </button>
+
                         {#if showTierMenu}
-                            <div class="tier-menu">
+                            <div class="tier-menu shadow-lg">
                                 <button
                                     class="tier-option"
-                                    class:active={currentTier ===
-                                        "container2wasm"}
+                                    class:active={currentTier === "container2wasm"}
                                     onclick={() => changeTier("container2wasm")}
                                 >
-                                    <span class="tier-icon">🐧</span> Alpine
-                                    (Full OS)
-                                    <span class="tier-desc"
-                                        >Real Linux sandbox</span
-                                    >
+                                    <span>🐳 Container (Linux)</span>
+                                    <span class="tier-desc">Alpine userland</span>
                                 </button>
                                 <button
                                     class="tier-option"
                                     class:active={currentTier === "wasi"}
                                     onclick={() => changeTier("wasi")}
                                 >
-                                    <span class="tier-icon">🌐</span> Shell
-                                    <span class="tier-desc"
-                                        >Lightweight fallback</span
-                                    >
+                                    <span>🐚 Shell (WASI)</span>
+                                    <span class="tier-desc">BusyBox fallback</span>
                                 </button>
                                 <button
                                     class="tier-option"
                                     class:active={currentTier === "native"}
                                     onclick={() => changeTier("native")}
                                 >
-                                    <span class="tier-icon">💻</span> Native CLI
-                                    <span class="tier-desc"
-                                        >Host shell (companion)</span
-                                    >
+                                    <span>💻 Native (Companion)</span>
+                                    <span class="tier-desc">Local CLI access</span>
                                 </button>
                             </div>
                         {/if}
                     </div>
                 </div>
-                <button class="close-btn" onclick={onClose} aria-label="Close"
-                    >✕</button
-                >
+
+                <div class="header-right">
+                    <button class="close-btn" onclick={onClose} aria-label="Close terminal">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                    </button>
+                </div>
             </div>
 
-            <div class="terminal-body" bind:this={terminalEl}>
-                {#each lines as line}
-                    <div class="terminal-line {line.type}">
-                        {line.text}
-                    </div>
-                {/each}
-                {#if isExecuting}
-                    <div class="terminal-line info">⏳ Executing...</div>
-                {/if}
-            </div>
-
-            <div class="terminal-input-area">
-                <span class="prompt">$</span>
-                <input
-                    type="text"
-                    class="terminal-input"
-                    bind:this={inputEl}
-                    bind:value={inputText}
-                    onkeydown={handleKeydown}
-                    placeholder="Type a command..."
-                    disabled={isExecuting}
-                />
+            <div class="terminal-body" bind:this={terminalContainer}>
+                <!-- xterm.js will mount here -->
             </div>
         </div>
     </div>
@@ -360,35 +261,49 @@
 <style>
     .terminal-overlay {
         position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.6);
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.4);
         backdrop-filter: blur(4px);
-        z-index: 1000;
         display: flex;
-        align-items: flex-end;
+        align-items: center;
         justify-content: center;
-        padding: var(--space-lg);
+        z-index: 1000;
+        animation: fadeIn 0.1s ease-out;
+    }
+
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
     }
 
     .terminal-panel {
-        width: 100%;
-        max-width: 900px;
-        height: 500px;
+        width: 90%;
+        height: 80%;
+        max-width: 1000px;
+        background: #0d1117;
+        border: 1px solid rgba(255, 255, 255, 0.1);
         display: flex;
         flex-direction: column;
-        background: #0d1117;
-        border-radius: var(--radius-lg);
-        border: 1px solid rgba(99, 102, 241, 0.3);
         overflow: hidden;
+        animation: slideUp 0.2s ease-out;
+    }
+
+    @keyframes slideUp {
+        from { transform: translateY(20px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
     }
 
     .terminal-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: var(--space-sm) var(--space-md);
+        height: 40px;
         background: #161b22;
         border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 var(--space-md);
     }
 
     .header-left {
@@ -398,9 +313,11 @@
     }
 
     .terminal-title {
+        color: #8b949e;
+        font-size: var(--text-xs);
         font-weight: 600;
-        color: #e6edf3;
-        font-size: var(--text-sm);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
     }
 
     .tier-selector {
@@ -408,18 +325,23 @@
     }
 
     .tier-btn {
-        background: rgba(99, 102, 241, 0.2);
-        border: 1px solid rgba(99, 102, 241, 0.4);
-        border-radius: var(--radius-sm);
-        color: var(--accent-primary);
+        background: #21262d;
+        border: 1px solid rgba(240, 246, 252, 0.1);
+        border-radius: var(--radius-md);
+        color: #c9d1d9;
         padding: 4px 10px;
         font-size: var(--text-xs);
         cursor: pointer;
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 6px;
         font-weight: 600;
         letter-spacing: 0.05em;
+    }
+
+    .tier-btn:hover {
+        background: #30363d;
+        border-color: #8b949e;
     }
 
     .tier-menu {
@@ -437,9 +359,7 @@
 
     .tier-option {
         display: flex;
-        align-items: center;
-        gap: var(--space-sm);
-        width: 100%;
+        flex-direction: column;
         padding: var(--space-sm) var(--space-md);
         background: none;
         border: none;
@@ -447,6 +367,8 @@
         cursor: pointer;
         font-size: var(--text-sm);
         text-align: left;
+        width: 100%;
+        transition: background 0.2s;
     }
 
     .tier-option:hover {
@@ -457,98 +379,62 @@
     }
 
     .tier-desc {
-        margin-left: auto;
-        font-size: var(--text-xs);
+        font-size: 10px;
         color: #8b949e;
+        margin-top: 2px;
+    }
+
+    .header-right {
+        display: flex;
+        align-items: center;
     }
 
     .close-btn {
         background: none;
         border: none;
         color: #8b949e;
-        font-size: 18px;
         cursor: pointer;
-        padding: 4px 8px;
+        padding: 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--radius-sm);
     }
+
     .close-btn:hover {
-        color: #e6edf3;
+        background: #f85149;
+        color: white;
     }
 
     .terminal-body {
         flex: 1;
-        overflow-y: auto;
-        padding: var(--space-md);
-        font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas",
-            monospace;
-        font-size: 13px;
-        line-height: 1.5;
-    }
-
-    .terminal-line {
-        white-space: pre-wrap;
-        word-break: break-word;
-    }
-
-    .terminal-line.input {
-        color: #58a6ff;
-    }
-    .terminal-line.stdout {
-        color: #e6edf3;
-    }
-    .terminal-line.stderr {
-        color: #f85149;
-    }
-    .terminal-line.info {
-        color: #8b949e;
-    }
-
-    .terminal-input-area {
-        display: flex;
-        align-items: center;
-        gap: var(--space-sm);
-        padding: var(--space-sm) var(--space-md);
-        border-top: 1px solid rgba(255, 255, 255, 0.1);
         background: #0d1117;
+        padding: 8px;
+        min-height: 0;
     }
 
-    .prompt {
-        color: #3fb950;
-        font-family: "JetBrains Mono", "Fira Code", monospace;
-        font-weight: 700;
-        font-size: 14px;
-    }
-
-    .terminal-input {
-        flex: 1;
-        background: none;
-        border: none;
-        color: #e6edf3;
-        font-family: "JetBrains Mono", "Fira Code", monospace;
-        font-size: 13px;
-        outline: none;
-    }
-
-    .terminal-input::placeholder {
-        color: #484f58;
+    :global(.xterm) {
+        height: 100%;
+        padding: 4px;
     }
 
     .status-dot {
-        width: 6px;
-        height: 6px;
+        width: 8px;
+        height: 8px;
         border-radius: 50%;
         background: #484f58;
-        display: inline-block;
     }
     .status-dot.ready {
         background: #3fb950;
-        box-shadow: 0 0 4px #3fb950;
+        box-shadow: 0 0 8px rgba(63, 185, 80, 0.5);
     }
     .status-dot.booting {
         background: #d29922;
-        animation: blink 1s ease-in-out infinite;
+        animation: pulse 1.5s infinite;
     }
-    @keyframes blink {
+
+    @keyframes pulse {
         0%, 100% { opacity: 1; }
-        50% { opacity: 0.3; }
+        50% { opacity: 0.4; }
     }
 </style>

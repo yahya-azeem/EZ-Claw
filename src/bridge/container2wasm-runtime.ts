@@ -191,6 +191,13 @@ export class C2WRuntime {
         });
     }
 
+    /** Send raw stdin to the container's shell (for interactive terminals). */
+    sendStdin(data: string): void {
+        if (this.worker && this.containerReady) {
+            this.worker.postMessage({ type: 'stdin', payload: { data } });
+        }
+    }
+
     // ── WASI Shim ────────────────────────────────────────────────────
 
     private createWASIImports(image: ContainerImage): Record<string, Function> {

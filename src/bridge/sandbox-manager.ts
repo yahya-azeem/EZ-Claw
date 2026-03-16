@@ -466,6 +466,13 @@ export class SandboxManager {
         await this.c2w.loadContainer(imageId);
     }
 
+    /** Send raw stdin to the active sandbox container. */
+    sendStdin(data: string): void {
+        if (this.config.tier === 'container2wasm' && this.c2w) {
+            this.c2w.sendStdin(data);
+        }
+    }
+
     /** Check if the container2wasm runtime is booted and ready. */
     get isContainerBooted(): boolean {
         return this.c2w?.isReady() ?? false;

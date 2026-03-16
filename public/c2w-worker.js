@@ -20,7 +20,9 @@ self.onmessage = async (e) => {
     try {
         if (type === 'load') await handleLoad(payload.image);
         else if (type === 'execute') await handleExecute(payload.command, payload.timeoutMs);
-        else if (type === 'stdin') stdinBuffer.push(payload.data);
+        else if (type === 'stdin') {
+            stdinBuffer.push(payload.data);
+        }
     } catch (err) {
         emitMsg('error', { message: err.message });
     }
@@ -68,9 +70,25 @@ async function handleExecute(command, timeoutMs) {
     stdoutBuffer = ''; stderrBuffer = ''; stdinBuffer.push(command + '\n');
     commandActive = true;
     const deadline = start + timeoutMs;
+    
+    let lastOutputTime = performance.now();
+    let currentStdoutLen = 0;
+
     while (commandActive && performance.now() < deadline) {
         await new Promise(r => setTimeout(r, 50));
-        if (stdoutBuffer.endsWith('# ') || stdoutBuffer.endsWith('$ ')) break;
+        
+        // Robust prompt detection: check last few characters of combined output
+        const recent = stdoutBuffer.slice(-10);
+        if (recent.includes('# ') || recent.includes('$ ')) break;
+
+        // If we haven't seen output for 2 seconds and we've seen SOME output, 
+        // assume it might be finished or waiting for input
+        if (stdoutBuffer.length > currentStdoutLen) {
+            currentStdoutLen = stdoutBuffer.length;
+            lastOutputTime = performance.now();
+        } else if (performance.now() - lastOutputTime > 2000 && stdoutBuffer.length > 0) {
+            break;
+        }
     }
     commandActive = false;
     emitMsg('result', { stdout: stdoutBuffer, stderr: stderrBuffer, exit_code: 0, duration_ms: performance.now() - start });
