@@ -62,6 +62,9 @@ export class C2WRuntime {
     private containerReady = false;
     private activeImage: ContainerImage | null = null;
     private stdinBuffer: string[] = [];
+    private stdinSharedBuffer: SharedArrayBuffer | null = null;
+    private stdinUint8: Uint8Array | null = null;
+    private stdinPointers: Int32Array | null = null; // [0] = read, [1] = write
     private stdoutBuffer: string = '';
     private stderrBuffer: string = '';
     private commandResolve: ((result: C2WCommandResult) => void) | null = null;
@@ -141,7 +144,23 @@ export class C2WRuntime {
         this.containerReady = false;
 
         this.initWorker();
-        this.worker!.postMessage({ type: 'load', payload: { image } });
+        
+        // Initialize SharedArrayBuffer for stdin if supported
+        if (typeof SharedArrayBuffer !== 'undefined') {
+            this.stdinSharedBuffer = new SharedArrayBuffer(1024 + 8); // 1K buffer + 2 pointers
+            this.stdinUint8 = new Uint8Array(this.stdinSharedBuffer, 8);
+            this.stdinPointers = new Int32Array(this.stdinSharedBuffer, 0, 2);
+            Atomics.store(this.stdinPointers, 0, 0); // read
+            Atomics.store(this.stdinPointers, 1, 0); // write
+        }
+
+        this.worker!.postMessage({ 
+            type: 'load', 
+            payload: { 
+                image,
+                stdinBuffer: this.stdinSharedBuffer 
+            } 
+        });
 
         // Wait for the worker to signal ready or error
         return new Promise<void>((resolve, reject) => {
@@ -196,7 +215,24 @@ export class C2WRuntime {
 
     /** Send raw stdin to the container's shell (for interactive terminals). */
     sendStdin(data: string): void {
-        if (this.worker && this.containerReady) {
+        if (!this.worker || !this.containerReady) return;
+
+        if (this.stdinPointers && this.stdinUint8) {
+            const encoder = new TextEncoder();
+            const bytes = encoder.encode(data);
+            for (let i = 0; i < bytes.length; i++) {
+                const write = Atomics.load(this.stdinPointers, 1);
+                const nextWrite = (write + 1) % 1024;
+                const read = Atomics.load(this.stdinPointers, 0);
+                
+                if (nextWrite === read) break; // Buffer full
+
+                this.stdinUint8[write] = bytes[i];
+                Atomics.store(this.stdinPointers, 1, nextWrite);
+            }
+            Atomics.notify(this.stdinPointers, 1); // Notify any waiter on write index
+        } else {
+            // Fallback to postMessage
             this.worker.postMessage({ type: 'stdin', payload: { data } });
         }
     }
