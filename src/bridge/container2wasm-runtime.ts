@@ -139,6 +139,20 @@ export class C2WRuntime {
 
         this.initWorker();
         this.worker!.postMessage({ type: 'load', payload: { image } });
+
+        // Wait for the worker to signal ready or error
+        return new Promise<void>((resolve, reject) => {
+            const offReady = this.onEvent('c2w:ready', () => {
+                offReady();
+                offError();
+                resolve();
+            });
+            const offError = this.onEvent('c2w:error', (data: any) => {
+                offReady();
+                offError();
+                reject(new Error(data?.error || 'Container failed to load'));
+            });
+        });
     }
 
     async swapContainer(imageId: string): Promise<void> {

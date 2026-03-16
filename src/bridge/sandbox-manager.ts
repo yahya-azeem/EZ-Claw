@@ -345,7 +345,6 @@ export class SandboxManager {
 
     /** Execute a command through the active sandbox tier with timeout enforcement. */
     async execute(command: string): Promise<ShellResult> {
-        this.emit(`$ ${command}\n`);
 
         let result: ShellResult;
 

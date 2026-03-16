@@ -36,14 +36,14 @@
 
         // Listen for terminal output from sandbox
         manager.onOutput((line) => {
-            if (line.includes("\x1b[31m")) {
-                lines = [
-                    ...lines,
-                    { text: line.replace(/\x1b\[\d+m/g, ""), type: "stderr" },
-                ];
-            } else {
-                lines = [...lines, { text: line, type: "stdout" }];
-            }
+            // Strip all ANSI escape codes (both real \x1b[ and bare [ prefixes)
+            const stripped = line.replace(/(\x1b\[|\[)\d*(;\d+)*m/g, "").trim();
+            if (!stripped) return; // Skip empty lines from escape-code-only output
+            const isError = line.includes("\x1b[31m") || line.includes("[31m");
+            lines = [
+                ...lines,
+                { text: stripped, type: isError ? "stderr" : "stdout" },
+            ];
             scrollToBottom();
         });
 

@@ -176,7 +176,14 @@ export class WASIContainer {
             throw new Error('Container not initialized');
         }
 
-        const parts = [command, ...args];
+        // If no args provided, split the command string on whitespace
+        // e.g. run("uname -a") → cmd="uname", cmdArgs=["-a"]
+        let parts: string[];
+        if (args.length === 0) {
+            parts = command.trim().split(/\s+/);
+        } else {
+            parts = [command, ...args];
+        }
         const cmd = parts[0];
         const cmdArgs = parts.slice(1);
 
