@@ -97,6 +97,9 @@ export class C2WRuntime {
                         this.commandPromise = null;
                     }
                     break;
+                case 'log':
+                    console.log(`[C2W Worker] ${payload.message}`);
+                    break;
                 case 'error':
                     this.emit('c2w:error', { error: payload.message, image: this.activeImage });
                     if (this.commandPromise) {

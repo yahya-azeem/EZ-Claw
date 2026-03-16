@@ -21,6 +21,7 @@ self.onmessage = async (e) => {
         if (type === 'load') await handleLoad(payload.image);
         else if (type === 'execute') await handleExecute(payload.command, payload.timeoutMs);
         else if (type === 'stdin') {
+            emitMsg('log', { message: `Worker received stdin: ${JSON.stringify(payload.data)}` });
             stdinBuffer.push(payload.data);
         }
     } catch (err) {
@@ -55,13 +56,18 @@ async function handleLoad(image) {
 
     const wasi = createWasiShim(image);
     const result = await WebAssembly.instantiate(bytes, { wasi_snapshot_preview1: wasi, wasi_unstable: wasi });
-    wasmInstance = result.instance;
+    emitMsg('log', { message: 'WASM Instance created, signaling ready' });
     emitMsg('ready');
 
     try {
         const _start = wasmInstance.exports._start;
-        if (_start) _start();
-    } catch (e) {}
+        if (_start) {
+            emitMsg('log', { message: 'Starting WASM kernel loop...' });
+            _start();
+        }
+    } catch (e) {
+        emitMsg('log', { message: `WASM execution finished or failed: ${e.message}` });
+    }
 }
 
 async function handleExecute(command, timeoutMs) {
@@ -77,7 +83,7 @@ function createWasiShim(image) {
         `EZCLAW_OS=${image.os || 'alpine'}`, `EZCLAW_ARCH=${image.arch || 'x86_64'}`,
         'LANG=C.UTF-8', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
     ];
-    const args = ['/bin/sh'];
+    const args = ['/bin/sh', '-i'];
     const getMem = () => wasmInstance.exports.memory;
 
     return {
@@ -103,13 +109,12 @@ function createWasiShim(image) {
             const mem = getMem();
             const view = new DataView(mem.buffer);
             if (stdinBuffer.length === 0) { 
-                // Return EAGAIN (6) to tell the program to try again later
-                // instead of 0 which signals EOF and kills the shell.
+                // Return EAGAIN (6)
                 view.setUint32(nread, 0, true); 
                 return 6; 
             }
             const inputData = stdinBuffer.shift();
-            emitMsg('log', { message: `Reading stdin: ${JSON.stringify(inputData)}` });
+            emitMsg('log', { message: `WASI fd_read consuming: ${JSON.stringify(inputData)}` });
             const input = textEncoder.encode(inputData);
             const buf = new Uint8Array(mem.buffer);
             let total = 0;
