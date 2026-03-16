@@ -1,8 +1,6 @@
 <script lang="ts">
-    import { onMount, onDestroy, tick } from "svelte";
-    import { Terminal } from "xterm";
-    import { FitAddon } from "xterm-addon-fit";
-    import "xterm/css/xterm.css";
+    import { onMount } from "svelte";
+    import TerminalView from "./TerminalView.svelte";
     import {
         SandboxManager,
         type SandboxTier,
@@ -19,163 +17,42 @@
     let containerBooting = $state(false);
     let containerReady = $state(false);
     let showTierMenu = $state(false);
-    let terminalContainer: HTMLDivElement | undefined = $state();
     
     let manager: SandboxManager | null = null;
-    let term: Terminal | null = null;
-    let fitAddon: FitAddon | null = null;
-    let cleanups: (() => void)[] = [];
+    let terminalView: any = $state();
 
-    // Initialize xterm
-    async function initTerminal() {
-        if (!terminalContainer || term) return;
-
-        console.log("[EZ-Claw] Initializing xterm.js (v2.1)...");
-
-        term = new Terminal({
-            cursorBlink: true,
-            theme: {
-// ... trimmed for readability in the prompt, but I will provide full content below
-                background: "#0d1117",
-                foreground: "#e6edf3",
-                cursor: "#58a6ff",
-                selectionBackground: "rgba(88, 166, 255, 0.3)",
-                black: "#484f58",
-                red: "#ff7b72",
-                green: "#3fb950",
-                yellow: "#d29922",
-                blue: "#58a6ff",
-                magenta: "#bc8cff",
-                cyan: "#39c5bb",
-                white: "#b1bac4",
-            },
-            fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-            fontSize: 13,
-            lineHeight: 1.4,
-            scrollback: 1000,
-            convertEol: true
-        });
-
-        fitAddon = new FitAddon();
-        term.loadAddon(fitAddon);
-        term.open(terminalContainer);
-        
-        // Use tick to ensure the DOM is ready before fitting
-        await tick();
-        fitAddon.fit();
-        term.focus();
-
-        // Connect input
-        term.onData((data) => {
-            if (manager && containerReady) {
-                manager.sendStdin(data);
-            }
-        });
-
-        // Welcome
-        term.writeln("\x1b[1;34m🦀 EZ-TERM 2.2 — Secure Sandbox\x1b[0m");
-        term.writeln("\x1b[2mInteractive Alpine Linux session active. Type directly below.\x1b[0m\n");
-    }
-
-    onMount(async () => {
-        console.log("[EZ-Claw] Terminal.svelte mounted (v2.2)");
-        await initTerminal();
-        
+    onMount(() => {
         manager = SandboxManager.getInstance();
-
-        // Proxy output to xterm
-        const offOutput = manager.onOutput((data) => {
-            if (term) term.write(data);
-        });
-        cleanups.push(offOutput);
-
-        // Progress events
-        const offProgress = manager.onC2WEvent("c2w:progress", (data: any) => {
-            if (data?.loaded && data?.total && term) {
-                const pct = Math.round((data.loaded / data.total) * 100);
-                const mb = (data.loaded / 1024 / 1024).toFixed(1);
-                const totalMb = (data.total / 1024 / 1024).toFixed(1);
-                
-                // Clear line and write progress
-                term.write(`\r\x1b[K⏳ Downloading container... ${mb}MB / ${totalMb}MB (${pct}%)`);
-            }
-        });
-        cleanups.push(offProgress);
-
-        const offReady = manager.onC2WEvent("c2w:ready", () => {
-            containerBooting = false;
-            containerReady = true;
-            if (term) {
-                term.write("\n\r\x1b[1;32m✅ Linux container ready!\x1b[0m\n\n");
-            }
-        });
-        cleanups.push(offReady);
-
-        const offError = manager.onC2WEvent("c2w:error", (data: any) => {
-            containerBooting = false;
-            if (term) {
-                term.writeln(`\r\n\x1b[1;31m❌ Container error: ${data?.error || "Unknown"}\x1b[0m`);
-            }
-        });
-        cleanups.push(offError);
-
-        // Update local state from manager
         const status = manager.getStatus();
         currentTier = status.tier;
         containerReady = manager.isContainerBooted;
-
-        // Auto-boot if not running and we are on container tier
-        if (currentTier === "container2wasm" && !manager.isContainerBooted) {
-            containerBooting = true;
-            term?.writeln("🐧 Booting Alpine Linux container...");
-            manager.bootContainer().catch((err) => {
-                containerBooting = false;
-                term?.writeln(`\r\n\x1b[31mFailed to boot: ${err.message}\x1b[0m`);
-            });
-        } else if (containerReady) {
-            term?.writeln("\x1b[32m✅ Linux container already running.\x1b[0m\n");
-        }
-
-        // Handle resize
-        const resizeObserver = new ResizeObserver(() => {
-            if (isOpen) {
-                fitAddon?.fit();
-            }
-        });
-        if (terminalContainer) resizeObserver.observe(terminalContainer);
-        cleanups.push(() => resizeObserver.disconnect());
     });
 
-    // Re-fit when opening modal
+    // Handle updates when manager state changes
     $effect(() => {
-        if (isOpen && fitAddon) {
-            tick().then(() => fitAddon?.fit());
+        if (isOpen && manager) {
+            const status = manager.getStatus();
+            currentTier = status.tier;
+            containerReady = manager.isContainerBooted;
         }
-    });
-
-    onDestroy(() => {
-        for (const cleanup of cleanups) cleanup();
-        term?.dispose();
     });
 
     async function changeTier(tier: SandboxTier) {
-        if (!manager || !term) return;
+        if (!manager) return;
         currentTier = tier;
         manager.setTier(tier);
         showTierMenu = false;
 
-        const info = manager.getStatus().info;
-        term.writeln(`\n\x1b[1;34m[*] Switched to ${info}\x1b[0m`);
-
         if (tier === "container2wasm" && !manager.isContainerBooted) {
             containerBooting = true;
             containerReady = false;
-            term.writeln("🐧 Booting Alpine Linux container...");
             try {
                 await manager.bootContainer();
-            } catch (err: any) {
+                containerReady = true;
+            } catch (err) {
+                // Error is handled by TerminalView events
+            } finally {
                 containerBooting = false;
-                term.writeln(`\x1b[31m❌ Failed to boot: ${err.message}\x1b[0m`);
             }
         } else if (tier === "container2wasm") {
             containerReady = true;
@@ -258,8 +135,8 @@
                 </div>
             </div>
 
-            <div class="terminal-body" bind:this={terminalContainer}>
-                <!-- xterm.js will mount here -->
+            <div class="terminal-body">
+                <TerminalView bind:this={terminalView} />
             </div>
         </div>
     </div>
@@ -296,6 +173,7 @@
         flex-direction: column;
         overflow: hidden;
         animation: slideUp 0.2s ease-out;
+        outline: none;
     }
 
     @keyframes slideUp {
@@ -418,11 +296,6 @@
         background: #0d1117;
         padding: 8px;
         min-height: 0;
-    }
-
-    :global(.xterm) {
-        height: 100%;
-        padding: 4px;
     }
 
     .status-dot {
