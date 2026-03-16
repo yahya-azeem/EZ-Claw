@@ -30,9 +30,12 @@
     async function initTerminal() {
         if (!terminalContainer || term) return;
 
+        console.log("[EZ-Claw] Initializing xterm.js (v2.1)...");
+
         term = new Terminal({
             cursorBlink: true,
             theme: {
+// ... trimmed for readability in the prompt, but I will provide full content below
                 background: "#0d1117",
                 foreground: "#e6edf3",
                 cursor: "#58a6ff",
@@ -60,6 +63,7 @@
         // Use tick to ensure the DOM is ready before fitting
         await tick();
         fitAddon.fit();
+        term.focus();
 
         // Connect input
         term.onData((data) => {
@@ -69,11 +73,12 @@
         });
 
         // Welcome
-        term.writeln("\x1b[1;34m🦀 EZ-Claw Terminal — Secure Sandbox\x1b[0m");
-        term.writeln("\x1b[2mFull Alpine Linux userland with apk package manager.\x1b[0m\n");
+        term.writeln("\x1b[1;34m🦀 EZ-TERM 2.2 — Secure Sandbox\x1b[0m");
+        term.writeln("\x1b[2mInteractive Alpine Linux session active. Type directly below.\x1b[0m\n");
     }
 
     onMount(async () => {
+        console.log("[EZ-Claw] Terminal.svelte mounted (v2.2)");
         await initTerminal();
         
         manager = SandboxManager.getInstance();
@@ -183,6 +188,8 @@
         <div
             class="terminal-panel glass-elevated"
             onclick={(e) => e.stopPropagation()}
+            onkeydown={(e) => e.key === 'Escape' && onClose()}
+            tabindex="-1"
             role="dialog"
             aria-label="Terminal"
         >

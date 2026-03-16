@@ -329,14 +329,12 @@ export class SandboxManager {
         return { ...this.config };
     }
 
-    /** Add a listener for output lines (for Terminal.svelte). */
-    onOutput(listener: (line: string) => void): void {
+    /** Add a listener for output lines (for Terminal.svelte). Returns unsubscribe fn. */
+    onOutput(listener: (line: string) => void): () => void {
         this.outputListeners.push(listener);
-    }
-
-    /** Remove an output listener. */
-    offOutput(listener: (line: string) => void): void {
-        this.outputListeners = this.outputListeners.filter(l => l !== listener);
+        return () => {
+            this.outputListeners = this.outputListeners.filter(l => l !== listener);
+        };
     }
 
     private emit(line: string): void {

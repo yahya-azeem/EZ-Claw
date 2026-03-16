@@ -66,32 +66,9 @@ async function handleLoad(image) {
 
 async function handleExecute(command, timeoutMs) {
     if (!wasmInstance) return;
-    const start = performance.now();
-    stdoutBuffer = ''; stderrBuffer = ''; stdinBuffer.push(command + '\n');
-    commandActive = true;
-    const deadline = start + timeoutMs;
-    
-    let lastOutputTime = performance.now();
-    let currentStdoutLen = 0;
-
-    while (commandActive && performance.now() < deadline) {
-        await new Promise(r => setTimeout(r, 50));
-        
-        // Robust prompt detection: check last few characters of combined output
-        const recent = stdoutBuffer.slice(-10);
-        if (recent.includes('# ') || recent.includes('$ ')) break;
-
-        // If we haven't seen output for 2 seconds and we've seen SOME output, 
-        // assume it might be finished or waiting for input
-        if (stdoutBuffer.length > currentStdoutLen) {
-            currentStdoutLen = stdoutBuffer.length;
-            lastOutputTime = performance.now();
-        } else if (performance.now() - lastOutputTime > 2000 && stdoutBuffer.length > 0) {
-            break;
-        }
-    }
-    commandActive = false;
-    emitMsg('result', { stdout: stdoutBuffer, stderr: stderrBuffer, exit_code: 0, duration_ms: performance.now() - start });
+    // For interactive terminals, we just push to stdin and let it loop
+    stdinBuffer.push(command + '\n');
+    emitMsg('result', { stdout: "Command queued", stderr: "", exit_code: 0, duration_ms: 0 });
 }
 
 function createWasiShim(image) {
@@ -125,8 +102,14 @@ function createWasiShim(image) {
             if (fd !== 0) return 8;
             const mem = getMem();
             const view = new DataView(mem.buffer);
-            if (stdinBuffer.length === 0) { view.setUint32(nread, 0, true); return 0; }
+            if (stdinBuffer.length === 0) { 
+                // Return EAGAIN (6) to tell the program to try again later
+                // instead of 0 which signals EOF and kills the shell.
+                view.setUint32(nread, 0, true); 
+                return 6; 
+            }
             const inputData = stdinBuffer.shift();
+            emitMsg('log', { message: `Reading stdin: ${JSON.stringify(inputData)}` });
             const input = textEncoder.encode(inputData);
             const buf = new Uint8Array(mem.buffer);
             let total = 0;
