@@ -99,7 +99,7 @@ function createWasiShim(image) {
         `EZCLAW_OS=${image.os || 'alpine'}`, `EZCLAW_ARCH=${image.arch || 'x86_64'}`,
         'LANG=C.UTF-8', 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
     ];
-    const args = ['/bin/sh', '-i'];
+    const args = ['/bin/sh'];
     const getMem = () => wasmInstance.exports.memory;
 
     return {
