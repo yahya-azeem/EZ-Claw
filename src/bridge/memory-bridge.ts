@@ -8,6 +8,7 @@
  * the storage layer 100% stable and same-origin.
  */
 
+import { getDB, STORES } from './db-bridge';
 import { getWasm } from './wasm-loader';
 
 export interface MemoryEntry {
@@ -24,35 +25,10 @@ let memories: MemoryEntry[] = [];
 
 // ── IndexedDB Persistence ─────────────────────────────────────────
 
-const IDB_DB_NAME = 'ezclaw-memory-v2';
-const IDB_STORE_NAME = 'memories';
-const IDB_KEY = 'all_memories';
-
-function openIDB(): Promise<IDBDatabase> {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open(IDB_DB_NAME, 1);
-        request.onupgradeneeded = () => {
-            const db = request.result;
-            if (!db.objectStoreNames.contains(IDB_STORE_NAME)) {
-                db.createObjectStore(IDB_STORE_NAME);
-            }
-        };
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-    });
-}
-
 async function loadFromIDB(): Promise<MemoryEntry[]> {
     try {
-        const db = await openIDB();
-        const data = await new Promise<MemoryEntry[] | null>((resolve, reject) => {
-            const tx = db.transaction(IDB_STORE_NAME, 'readonly');
-            const store = tx.objectStore(IDB_STORE_NAME);
-            const req = store.get(IDB_KEY);
-            req.onsuccess = () => resolve(req.result || null);
-            req.onerror = () => reject(req.error);
-        });
-        db.close();
+        const db = await getDB();
+        const data = await db.get(STORES.MEMORIES, 'all_memories');
         return data || [];
     } catch (e) {
         console.warn('[EZ-Claw] Memory load from IndexedDB failed:', e);
@@ -62,15 +38,8 @@ async function loadFromIDB(): Promise<MemoryEntry[]> {
 
 async function saveToIDB(): Promise<void> {
     try {
-        const db = await openIDB();
-        await new Promise<void>((resolve, reject) => {
-            const tx = db.transaction(IDB_STORE_NAME, 'readwrite');
-            const store = tx.objectStore(IDB_STORE_NAME);
-            const req = store.put(memories, IDB_KEY);
-            req.onsuccess = () => resolve();
-            req.onerror = () => reject(req.error);
-        });
-        db.close();
+        const db = await getDB();
+        await db.put(STORES.MEMORIES, memories, 'all_memories');
     } catch (e) {
         console.warn('[EZ-Claw] Memory save to IndexedDB failed:', e);
     }

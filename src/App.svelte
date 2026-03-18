@@ -40,8 +40,6 @@
   } from "./bridge/storage-bridge";
   import {
     initMemory,
-    exportMemoryData,
-    loadMemoryFromData,
   } from "./bridge/memory-bridge";
 
   let wasmReady = $state(false);
@@ -70,74 +68,6 @@
   let temperature = $state(0.7);
   let apiUrl = $state("");
 
-  // ── Memory persistence helpers (using IndexedDB to avoid localStorage 5MB limit) ──
-  const MEMORY_DB_NAME = "ezclaw_memory_db";
-  const MEMORY_DB_STORE = "memory";
-  const MEMORY_DB_KEY = "ezclaw_memory";
-  let memoryAutoSaveId: number | undefined;
-
-  function openMemoryDB(): Promise<IDBDatabase> {
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open(MEMORY_DB_NAME, 1);
-      request.onupgradeneeded = () => {
-        const db = request.result;
-        if (!db.objectStoreNames.contains(MEMORY_DB_STORE)) {
-          db.createObjectStore(MEMORY_DB_STORE);
-        }
-      };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  async function loadSavedMemory(): Promise<Uint8Array | null> {
-    try {
-      const db = await openMemoryDB();
-      const tx = db.transaction(MEMORY_DB_STORE, "readonly");
-      const store = tx.objectStore(MEMORY_DB_STORE);
-      const request = store.get(MEMORY_DB_KEY);
-      const result = await new Promise<any>((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
-      db.close();
-      return result || null;
-    } catch {
-      return null;
-    }
-  }
-
-  async function persistMemory(): Promise<void> {
-    try {
-      const data = exportMemoryData();
-      if (data) {
-        const db = await openMemoryDB();
-        const tx = db.transaction(MEMORY_DB_STORE, "readwrite");
-        tx.objectStore(MEMORY_DB_STORE).put(data, MEMORY_DB_KEY);
-        await new Promise<void>((resolve, reject) => {
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => reject(tx.error);
-        });
-        db.close();
-      }
-    } catch {
-      /* silent */
-    }
-  }
-
-  // Persist memory on page unload
-  if (typeof window !== "undefined") {
-    window.addEventListener("beforeunload", () => {
-      // Synchronous fallback — IndexedDB can't be guaranteed to complete on unload,
-      // but the 30s auto-save ensures minimal data loss.
-      persistMemory();
-    });
-  }
-
-  onDestroy(() => {
-    if (memoryAutoSaveId) clearInterval(memoryAutoSaveId);
-  });
-
   onMount(async () => {
     try {
       // Initialize storage first (always available)
@@ -150,17 +80,9 @@
         await initWasm();
         wasmReady = true;
 
-        // Initialize memory system (Native JSON store)
-        const savedMemory = await loadSavedMemory();
-        if (savedMemory) {
-            await loadMemoryFromData(savedMemory);
-            console.log("[EZ-Claw] Memory restored from IndexedDB");
-        } else {
-            await initMemory();
-        }
-
-        // Auto-save memory every 30 seconds
-        memoryAutoSaveId = setInterval(persistMemory, 30000) as unknown as number;
+        // Initialize memory system (Automated JSON store)
+        await initMemory();
+        console.log("[EZ-Claw] Memory system initialized (Automated)");
 
       } catch (err) {
         console.warn("[EZ-Claw] Initialization error:", err);

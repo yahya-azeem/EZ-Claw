@@ -6,16 +6,8 @@
  * optional API key encryption (same chacha20poly1305 as ZeroClaw).
  */
 
-import { openDB, type IDBPDatabase } from 'idb';
+import { getDB, STORES } from './db-bridge';
 import { getWasm } from './wasm-loader';
-
-const DB_NAME = 'ezclaw';
-const DB_VERSION = 1;
-
-// Store names
-const SESSIONS_STORE = 'sessions';
-const CONFIG_STORE = 'config';
-const SECRETS_STORE = 'secrets';
 
 export interface SessionData {
     id: string;
@@ -43,53 +35,30 @@ interface SecretsEntry {
     encrypted: boolean;
 }
 
-let db: IDBPDatabase | null = null;
-
 /**
- * Initialize the IndexedDB database.
+ * Initialize the storage system.
  */
 export async function initStorage(): Promise<void> {
-    db = await openDB(DB_NAME, DB_VERSION, {
-        upgrade(database) {
-            // Sessions store
-            if (!database.objectStoreNames.contains(SESSIONS_STORE)) {
-                const sessionsStore = database.createObjectStore(SESSIONS_STORE, {
-                    keyPath: 'id',
-                });
-                sessionsStore.createIndex('updatedAt', 'updatedAt');
-            }
-
-            // Config store (key-value)
-            if (!database.objectStoreNames.contains(CONFIG_STORE)) {
-                database.createObjectStore(CONFIG_STORE, { keyPath: 'key' });
-            }
-
-            // Secrets store (encrypted API keys)
-            if (!database.objectStoreNames.contains(SECRETS_STORE)) {
-                database.createObjectStore(SECRETS_STORE, { keyPath: 'key' });
-            }
-        },
-    });
+    await getDB();
 }
 
-function getDb(): IDBPDatabase {
-    if (!db) throw new Error('Storage not initialized. Call initStorage() first.');
-    return db;
+async function getDb() {
+    return await getDB();
 }
 
 // ── Sessions ─────────────────────────────────────────────────────
 
 export async function saveSession(session: SessionData): Promise<void> {
     session.updatedAt = new Date().toISOString();
-    await getDb().put(SESSIONS_STORE, session);
+    await (await getDb()).put(STORES.SESSIONS, session);
 }
 
 export async function getSession(id: string): Promise<SessionData | undefined> {
-    return getDb().get(SESSIONS_STORE, id);
+    return (await getDb()).get(STORES.SESSIONS, id);
 }
 
 export async function getAllSessions(): Promise<SessionData[]> {
-    const sessions = await getDb().getAll(SESSIONS_STORE);
+    const sessions = await (await getDb()).getAll(STORES.SESSIONS);
     // Sort by updatedAt descending
     return sessions.sort(
         (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
@@ -97,22 +66,22 @@ export async function getAllSessions(): Promise<SessionData[]> {
 }
 
 export async function deleteSession(id: string): Promise<void> {
-    await getDb().delete(SESSIONS_STORE, id);
+    await (await getDb()).delete(STORES.SESSIONS, id);
 }
 
 // ── Config ───────────────────────────────────────────────────────
 
 export async function saveConfig(key: string, value: string): Promise<void> {
-    await getDb().put(CONFIG_STORE, { key, value });
+    await (await getDb()).put(STORES.CONFIG, { key, value });
 }
 
 export async function getConfig(key: string): Promise<string | undefined> {
-    const entry = await getDb().get(CONFIG_STORE, key);
+    const entry = await (await getDb()).get(STORES.CONFIG, key);
     return entry?.value;
 }
 
 export async function getAllConfig(): Promise<Record<string, string>> {
-    const entries = await getDb().getAll(CONFIG_STORE);
+    const entries = await (await getDb()).getAll(STORES.CONFIG);
     const config: Record<string, string> = {};
     for (const entry of entries) {
         config[entry.key] = entry.value;
@@ -141,7 +110,7 @@ export async function storeSecret(
         stored = { key, value, encrypted: false };
     }
 
-    await getDb().put(SECRETS_STORE, stored);
+    await (await getDb()).put(STORES.SECRETS, stored);
 }
 
 /**
@@ -151,7 +120,7 @@ export async function getSecret(
     key: string,
     passphrase?: string
 ): Promise<string | undefined> {
-    const entry: SecretsEntry | undefined = await getDb().get(SECRETS_STORE, key);
+    const entry: SecretsEntry | undefined = await (await getDb()).get(STORES.SECRETS, key);
     if (!entry) return undefined;
 
     if (entry.encrypted) {
@@ -166,7 +135,7 @@ export async function getSecret(
 }
 
 export async function deleteSecret(key: string): Promise<void> {
-    await getDb().delete(SECRETS_STORE, key);
+    await (await getDb()).delete(STORES.SECRETS, key);
 }
 
 // ── Export/Import (session persistence) ──────────────────────────

@@ -6,7 +6,8 @@
  * for durability across sessions, and provides export/import as ZIP.
  */
 
-import type { WasmWorkspace } from './wasm-loader';
+import { getDB, STORES } from './db-bridge';
+import type { WasmWorkspaceInstance } from './wasm-loader';
 
 const WORKSPACE_STORAGE_KEY = 'ezclaw_workspace';
 const WORKSPACE_VERSION = 1;
@@ -14,7 +15,7 @@ const WORKSPACE_VERSION = 1;
 /**
  * Save workspace state to IndexedDB.
  */
-export async function saveWorkspace(workspace: WasmWorkspace): Promise<void> {
+export async function saveWorkspace(workspace: WasmWorkspaceInstance): Promise<void> {
     const data = workspace.export();
     const payload = {
         version: WORKSPACE_VERSION,
@@ -23,15 +24,8 @@ export async function saveWorkspace(workspace: WasmWorkspace): Promise<void> {
     };
 
     try {
-        const db = await openWorkspaceDB();
-        const tx = db.transaction('workspace', 'readwrite');
-        const store = tx.objectStore('workspace');
-        store.put(payload, WORKSPACE_STORAGE_KEY);
-        await new Promise<void>((resolve, reject) => {
-            tx.oncomplete = () => resolve();
-            tx.onerror = () => reject(tx.error);
-        });
-        db.close();
+        const db = await getDB();
+        await db.put(STORES.WORKSPACE, payload, WORKSPACE_STORAGE_KEY);
     } catch (err) {
         console.error('[Workspace] Save failed:', err);
     }
@@ -40,18 +34,10 @@ export async function saveWorkspace(workspace: WasmWorkspace): Promise<void> {
 /**
  * Load workspace state from IndexedDB.
  */
-export async function loadWorkspace(workspace: WasmWorkspace): Promise<boolean> {
+export async function loadWorkspace(workspace: WasmWorkspaceInstance): Promise<boolean> {
     try {
-        const db = await openWorkspaceDB();
-        const tx = db.transaction('workspace', 'readonly');
-        const store = tx.objectStore('workspace');
-        const request = store.get(WORKSPACE_STORAGE_KEY);
-
-        const payload = await new Promise<any>((resolve, reject) => {
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
-        });
-        db.close();
+        const db = await getDB();
+        const payload = await db.get(STORES.WORKSPACE, WORKSPACE_STORAGE_KEY);
 
         if (payload?.data) {
             workspace.import(payload.data);
@@ -67,7 +53,7 @@ export async function loadWorkspace(workspace: WasmWorkspace): Promise<boolean> 
 /**
  * Export workspace as a downloadable JSON file.
  */
-export function exportWorkspaceAsJSON(workspace: WasmWorkspace): void {
+export function exportWorkspaceAsJSON(workspace: WasmWorkspaceInstance): void {
     const data = workspace.export();
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -82,7 +68,7 @@ export function exportWorkspaceAsJSON(workspace: WasmWorkspace): void {
  * Import workspace from a JSON file.
  */
 export async function importWorkspaceFromJSON(
-    workspace: WasmWorkspace,
+    workspace: WasmWorkspaceInstance,
     file: File
 ): Promise<boolean> {
     try {
@@ -99,7 +85,7 @@ export async function importWorkspaceFromJSON(
 /**
  * Auto-save workspace periodically (call from setInterval).
  */
-export function startAutoSave(workspace: WasmWorkspace, intervalMs = 30000): number {
+export function startAutoSave(workspace: WasmWorkspaceInstance, intervalMs = 30000): number {
     return window.setInterval(async () => {
         const dirtyJson = workspace.take_dirty_paths();
         const dirty = JSON.parse(dirtyJson);
@@ -110,18 +96,3 @@ export function startAutoSave(workspace: WasmWorkspace, intervalMs = 30000): num
     }, intervalMs);
 }
 
-// ── IndexedDB helpers ────────────────────────────────────────────
-
-function openWorkspaceDB(): Promise<IDBDatabase> {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open('ezclaw_workspace_db', 1);
-        request.onupgradeneeded = () => {
-            const db = request.result;
-            if (!db.objectStoreNames.contains('workspace')) {
-                db.createObjectStore('workspace');
-            }
-        };
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-    });
-}

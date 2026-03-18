@@ -12,6 +12,7 @@ let sharedStdinPointers = null;
 let stdoutBuffer = '';
 let stderrBuffer = '';
 let commandActive = false;
+let lastStdinActivity = Date.now();
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -26,6 +27,7 @@ self.onmessage = async (e) => {
         else if (type === 'stdin') {
             emitMsg('log', { message: `Worker received stdin: ${JSON.stringify(payload.data)}` });
             stdinBuffer.push(payload.data);
+            lastStdinActivity = Date.now();
         }
     } catch (err) {
         emitMsg('error', { message: err.message });
@@ -171,6 +173,7 @@ function createWasiShim(image) {
                             memUint8[ptr + j] = char;
                             Atomics.store(sharedStdinPointers, 0, (read + 1) % 1024);
                             totalRead++;
+                            lastStdinActivity = Date.now();
                             emitMsg('log', { message: `WASI fd_read consumed byte ${char} from SAB` });
                         }
                         if (totalRead > 0) break;
@@ -272,7 +275,11 @@ function createWasiShim(image) {
                         // If no data and we are the only poll, wait a bit to save CPU
                         if (!hasData && n === 1 && sharedStdinPointers) {
                             const write = Atomics.load(sharedStdinPointers, 1);
-                            try { Atomics.wait(sharedStdinPointers, 1, write, 100); } catch(e) {}
+                            const now = Date.now();
+                            const idleTime = now - lastStdinActivity;
+                            const waitTime = idleTime < 5000 ? 10 : 250;
+                            
+                            try { Atomics.wait(sharedStdinPointers, 1, write, waitTime); } catch(e) {}
                             hasData = Atomics.load(sharedStdinPointers, 0) !== Atomics.load(sharedStdinPointers, 1);
                         }
 
