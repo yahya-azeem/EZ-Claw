@@ -76,8 +76,8 @@ export class C2WRuntime {
         if (this.worker) return;
         
         const base = (typeof import.meta !== 'undefined' && import.meta.env?.BASE_URL) || './';
-        // v3: Hard cache bypass via renaming + timestamp
-        const workerUrl = `${base}c2w-worker-v3.js?t=${Date.now()}`.replace(/\/+/g, '/');
+        // v4: Hard cache bypass via renaming + timestamp
+        const workerUrl = `${base}c2w-worker-v4.js?t=${Date.now()}`.replace(/\/+/g, '/');
         
         console.log(`[EZ-Claw] Initializing C2W Worker at ${workerUrl}`);
         this.worker = new Worker(workerUrl, { type: 'module' });

@@ -127,6 +127,8 @@
       <label class="field">
         <span class="field-label">Provider</span>
         <select
+          id="setting-provider"
+          name="provider"
           class="input"
           bind:value={localProvider}
           onchange={handleProviderChange}
@@ -143,6 +145,8 @@
       <label class="field">
         <span class="field-label">Model</span>
         <input
+          id="setting-model"
+          name="model"
           class="input"
           type="text"
           bind:value={localModel}
@@ -171,6 +175,8 @@
         >
         <div class="api-key-wrapper">
           <input
+            id="setting-api-key"
+            name="api-key"
             class="input"
             type={showApiKey ? "text" : "password"}
             bind:value={localApiKey}
@@ -196,6 +202,8 @@
             >API URL {localProvider !== "custom" ? "(optional)" : ""}</span
           >
           <input
+            id="setting-api-url"
+            name="api-url"
             class="input"
             type="text"
             bind:value={localApiUrl}
@@ -214,6 +222,8 @@
       <label class="field">
         <span class="field-label">Temperature: {localTemp.toFixed(1)}</span>
         <input
+          id="setting-temperature"
+          name="temperature"
           type="range"
           min="0"
           max="2"
