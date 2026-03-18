@@ -105,8 +105,14 @@ function createWasiShim(image) {
     const getMem = () => wasmInstance.exports.memory;
 
     return {
-        proc_exit: (code) => { commandActive = false; emitMsg('exit', { code }); },
+        proc_exit: (code) => { 
+            emitMsg('log', { message: `WASI proc_exit(${code})` });
+            commandActive = false; 
+            emitMsg('exit', { code }); 
+        },
         fd_write: (fd, iovs, iovsLen, nwritten) => {
+            // Only log non-stdout/stderr writes or infrequent updates to avoid flooding
+            if (fd > 2) emitMsg('log', { message: `WASI fd_write(fd=${fd}, iovsLen=${iovsLen})` });
             const mem = getMem();
             const view = new DataView(mem.buffer);
             const buf = new Uint8Array(mem.buffer);
@@ -124,9 +130,11 @@ function createWasiShim(image) {
         },
         fd_read: (fd, iovs, iovsLen, nread) => {
             if (fd === 0) {
-                emitMsg('log', { message: `fd_read called for stdin (fd 0)` });
+                emitMsg('log', { message: `WASI fd_read(fd=0, iovsLen=${iovsLen})` });
+            } else {
+                emitMsg('log', { message: `WASI fd_read(fd=${fd}, iovsLen=${iovsLen})` });
             }
-            if (fd !== 0) return 8;
+            if (fd !== 0) return 8; // EBADF
             const mem = getMem();
             const view = new DataView(mem.buffer);
             const memUint8 = new Uint8Array(mem.buffer);
@@ -145,11 +153,10 @@ function createWasiShim(image) {
 
                             if (read === write) {
                                 if (totalRead > 0) break; // Return what we have
-                                // Wait for data - wrap in try-catch because this can trap if not isolated
+                                // Wait for data
                                 try {
-                                    Atomics.wait(sharedStdinPointers, 1, write, 100); // 100ms timeout
+                                    Atomics.wait(sharedStdinPointers, 1, write, 50); // Shorter timeout for better responsiveness
                                 } catch (atomicErr) {
-                                    // If we can't wait, we break and hope for the next poll
                                     break;
                                 }
                                 read = Atomics.load(sharedStdinPointers, 0);
@@ -164,7 +171,7 @@ function createWasiShim(image) {
                             memUint8[ptr + j] = char;
                             Atomics.store(sharedStdinPointers, 0, (read + 1) % 1024);
                             totalRead++;
-                            emitMsg('log', { message: `fd_read consumed byte ${char} from SAB` });
+                            emitMsg('log', { message: `WASI fd_read consumed byte ${char} from SAB` });
                         }
                         if (totalRead > 0) break;
                     }
@@ -177,9 +184,8 @@ function createWasiShim(image) {
 
             // ── Priority 2: Message Buffer (Fallback) ──
             if (stdinBuffer.length === 0) { 
-                // Return EAGAIN (6)
                 view.setUint32(nread, 0, true); 
-                return 6; 
+                return 6; // EAGAIN
             }
             const inputData = stdinBuffer.shift();
             emitMsg('log', { message: `WASI fd_read consuming fallback: ${JSON.stringify(inputData)}` });
@@ -195,6 +201,7 @@ function createWasiShim(image) {
             return 0;
         },
         args_get: (argv, buf) => {
+            emitMsg('log', { message: `WASI args_get` });
             const mem = getMem();
             const view = new DataView(mem.buffer);
             const bufArr = new Uint8Array(mem.buffer);
@@ -207,12 +214,14 @@ function createWasiShim(image) {
             return 0;
         },
         args_sizes_get: (argc, size) => {
+            emitMsg('log', { message: `WASI args_sizes_get` });
             const view = new DataView(getMem().buffer);
             view.setUint32(argc, args.length, true);
             view.setUint32(size, args.reduce((s, a) => s + a.length + 1, 0), true);
             return 0;
         },
         environ_get: (envp, buf) => {
+            emitMsg('log', { message: `WASI environ_get` });
             const mem = getMem();
             const view = new DataView(mem.buffer);
             const bufArr = new Uint8Array(mem.buffer);
@@ -225,23 +234,55 @@ function createWasiShim(image) {
             return 0;
         },
         environ_sizes_get: (count, size) => {
+            emitMsg('log', { message: `WASI environ_sizes_get` });
             const view = new DataView(getMem().buffer);
             view.setUint32(count, env.length, true);
             view.setUint32(size, env.reduce((s, e) => s + e.length + 1, 0), true);
             return 0;
         },
-        random_get: (buf, len) => { crypto.getRandomValues(new Uint8Array(getMem().buffer, buf, len)); return 0; },
-        clock_time_get: (id, prec, time) => { new DataView(getMem().buffer).setBigUint64(time, BigInt(Date.now()) * 1000000n, true); return 0; },
-        clock_res_get: (id, res) => { new DataView(getMem().buffer).setBigUint64(res, 1000000n, true); return 0; },
-        poll_oneoff: (inPtr, outPtr, n, res) => { new DataView(getMem().buffer).setUint32(res, 0, true); return 0; },
-        fd_close: () => 0,
-        fd_fdstat_get: (fd, buf) => { const v = new DataView(getMem().buffer); v.setUint8(buf, 2); v.setUint16(buf + 2, 0, true); v.setBigUint64(buf + 8, 0n, true); v.setBigUint64(buf + 16, 0n, true); return 0; },
-        fd_seek: () => 0,
+        random_get: (buf, len) => { 
+            // emitMsg('log', { message: `WASI random_get(len=${len})` });
+            crypto.getRandomValues(new Uint8Array(getMem().buffer, buf, len)); 
+            return 0; 
+        },
+        clock_time_get: (id, prec, time) => { 
+            new DataView(getMem().buffer).setBigUint64(time, BigInt(Date.now()) * 1000000n, true); 
+            return 0; 
+        },
+        clock_res_get: (id, res) => { 
+            new DataView(getMem().buffer).setBigUint64(res, 1000000n, true); 
+            return 0; 
+        },
+        poll_oneoff: (inPtr, outPtr, n, res) => { 
+            emitMsg('log', { message: `WASI poll_oneoff(n=${n})` });
+            new DataView(getMem().buffer).setUint32(res, 0, true); 
+            return 0; 
+        },
+        fd_close: (fd) => { 
+            emitMsg('log', { message: `WASI fd_close(${fd})` });
+            return 0; 
+        },
+        fd_fdstat_get: (fd, buf) => { 
+            // emitMsg('log', { message: `WASI fd_fdstat_get(${fd})` });
+            const v = new DataView(getMem().buffer); 
+            v.setUint8(buf, 2); // Character device
+            v.setUint16(buf + 2, 0, true); 
+            v.setBigUint64(buf + 8, 0n, true); 
+            v.setBigUint64(buf + 16, 0n, true); 
+            return 0; 
+        },
+        fd_seek: (fd) => { 
+            emitMsg('log', { message: `WASI fd_seek(${fd})` });
+            return 0; 
+        },
         fd_fdstat_set_flags: () => 0,
         fd_fdstat_set_rights: () => 0,
-        fd_prestat_get: () => 8,
+        fd_prestat_get: (fd, buf) => { 
+            emitMsg('log', { message: `WASI fd_prestat_get(${fd})` });
+            return 8; // No pre-opened dirs
+        },
         fd_prestat_dir_name: () => 8,
-        path_open: () => 44,
+        path_open: () => 44, // ENOSYS
         path_create_directory: () => 0,
         path_remove_directory: () => 0,
         path_unlink_file: () => 0,
