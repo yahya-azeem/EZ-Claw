@@ -95,6 +95,25 @@ export const PROVIDERS: ProviderDef[] = [
         defaultApiUrl: 'https://api.puter.com/v1',
     },
     {
+        id: 'github-copilot',
+        name: 'GitHub Copilot (Models)',
+        defaultModel: 'gpt-4o',
+        models: [
+            'gpt-4o', 'gpt-4o-mini', 'o1-preview', 'o1-mini',
+            'claude-3-5-sonnet', 'claude-3-haiku', 'claude-3-opus',
+            'gemini-1.5-pro', 'gemini-1.5-flash',
+            'llama-3.3-70b', 'phi-3.5-moe'
+        ],
+        modelLabels: [
+            'GPT-4o', 'GPT-4o mini', 'o1 Preview', 'o1 mini',
+            'Claude 3.5 Sonnet', 'Claude 3 Haiku', 'Claude 3 Opus',
+            'Gemini 1.5 Pro', 'Gemini 1.5 Flash',
+            'Llama 3.3 70B', 'Phi-3.5 MoE'
+        ],
+        free: false,
+        defaultApiUrl: 'https://models.inference.ai.azure.com',
+    },
+    {
         id: 'zerogravity',
         name: 'ZeroGravity (Antigravity)',
         defaultModel: 'sonnet-4.6',

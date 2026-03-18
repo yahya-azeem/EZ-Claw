@@ -69,6 +69,15 @@
       free: true,
       signupUrl: "https://aistudio.google.com/",
     },
+    {
+      id: "github-copilot",
+      name: "GitHub Copilot",
+      icon: "🐙",
+      description: "Claude, Gemini & GPT-4o",
+      defaultModel: "gpt-4o",
+      free: false,
+      signupUrl: "https://github.com/marketplace/models",
+    },
   ];
 
   function selectProvider(id: string) {

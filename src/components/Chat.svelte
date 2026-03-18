@@ -1,58 +1,20 @@
 <script lang="ts">
   import { tick } from "svelte";
   import MessageBubble from "./MessageBubble.svelte";
-  import { getWasm } from "../bridge/wasm-loader";
   import {
-    streamChat,
-    chatCompletion,
-    type ProviderConfig,
-  } from "../bridge/provider-bridge";
-  import {
-    saveSession,
-    getSession,
-    type SessionData,
-  } from "../bridge/storage-bridge";
-  import { recallMemories, storeMemory } from "../bridge/memory-bridge";
-  import { buildProviderHeaders, NO_KEY_PROVIDERS } from "../bridge/providers";
+    onClawsChange,
+    getClaw,
+    runClawTask,
+    stopClawTask
+  } from "../bridge/claw-orchestrator";
   import {
     buildIdentityPrompt,
     buildBootstrapPrompt,
-    loadIdentity,
-    saveIdentity,
-    setFact,
-    isFirstRun,
-    markBootstrapped,
-    loadUser,
-    saveUser,
+    isFirstRun
   } from "../bridge/identity-bridge";
-  import {
-    executeToolCall,
-    type ToolCallRequest,
-    type ToolCallResult,
-  } from "../bridge/tool-runtime";
-  import { SandboxManager } from "../bridge/sandbox-manager";
-  import { C2WRuntime } from "../bridge/container2wasm-runtime";
-
-  // Per-Claw run-time instances — using centralized registry for isolation
-  function getRuntime(): C2WRuntime {
-    return C2WRuntime.getInstance(sessionId || "__default__");
-  }
-
-  function getSandbox(): SandboxManager {
-    return SandboxManager.getInstance(sessionId || "__default__");
-  }
-
-  // Per-Claw workspaces — each Claw has its own virtual filesystem
-  const workspaces = new Map<string, any>();
-  function getSharedWorkspace(): any {
-    const key = sessionId || "__default__";
-    let ws = workspaces.get(key);
-    if (!ws) {
-      ws = new (getWasm() as any).WasmWorkspace();
-      workspaces.set(key, ws);
-    }
-    return ws;
-  }
+  import { recallMemories } from "../bridge/memory-bridge";
+  import { NO_KEY_PROVIDERS } from "../bridge/providers";
+  import type { SessionData } from "../bridge/storage-bridge";
 
   interface Props {
     sessionId: string | null;
@@ -88,31 +50,25 @@
   let chatContainer: HTMLDivElement | undefined = $state();
   let inputEl: HTMLTextAreaElement | undefined = $state();
 
-  // Load session messages when session changes
+  // Reactive subscription to the Background Orchestrator
   $effect(() => {
     if (sessionId) {
-      streamingContent = "";
-      isStreaming = false;
-      toolActivity = "";
-      loadSessionMessages(sessionId);
+      // initial load
+      const session = getClaw(sessionId);
+      if (session) messages = session.messages;
+
+      const unsub = onClawsChange(() => {
+        const claw = getClaw(sessionId!);
+        if (claw) {
+          messages = claw.messages;
+          // We could also bridge status/streaming flags from the worker here
+        }
+      });
+      return unsub;
     } else {
       messages = [];
     }
   });
-
-  async function loadSessionMessages(id: string) {
-    try {
-      const session = await getSession(id);
-      if (session && session.messages) {
-        messages = session.messages;
-        await scrollToBottom();
-      } else {
-        messages = [];
-      }
-    } catch {
-      messages = [];
-    }
-  }
 
   async function scrollToBottom() {
     await tick();
@@ -125,77 +81,34 @@
     const text = inputText.trim();
     if (!text || isStreaming) return;
 
-    if (!apiKey) {
-      if (!NO_KEY_PROVIDERS.includes(provider)) {
-        messages = [
-          ...messages,
-          {
-            role: "assistant",
-            content:
-              "⚠️ **No API key configured.** Please open Settings and enter your API key to start chatting.",
-          },
-        ];
-        return;
-      }
+    if (!apiKey && !NO_KEY_PROVIDERS.includes(provider)) {
+      messages = [...messages, {
+        role: "assistant",
+        content: "⚠️ **No API key configured.** Please open Settings and enter your API key to start chatting.",
+      }];
+      return;
     }
 
+    // Local echo for immediate feedback
     messages = [...messages, { role: "user", content: text }];
     inputText = "";
-    isStreaming = true;
-    streamingContent = "";
-    toolActivity = "";
+    isStreaming = true; // Temporary UI flag, worker will eventually own this
+    toolActivity = "Starting...";
 
     await scrollToBottom();
 
     try {
-      const wasm = getWasm();
-
-      // Load agent identity
+      // 1. Pre-process local state
       let identityPrompt = buildIdentityPrompt();
+      if (isFirstRun()) identityPrompt += "\n\n" + buildBootstrapPrompt();
 
-      // First-run bootstrap: inject OpenClaw-style "Who am I?" prompt
-      const firstRun = isFirstRun();
-      if (firstRun) {
-        identityPrompt += "\n\n" + buildBootstrapPrompt();
-      }
-
-      // Recall relevant memories
       let memoriesArr: string[] = [];
       try {
         const recalled = recallMemories(text, 5);
-        memoriesArr = recalled.map(
-          (m) => `[${m.category}] ${m.key}: ${m.content}`,
-        );
-      } catch {
-        /* Memory not initialized yet */
-      }
+        memoriesArr = recalled.map(m => `[${m.category}] ${m.key}: ${m.content}`);
+      } catch {}
 
-      // Build messages with WASM agent (includes system prompt + identity + memories)
-      const cleanMessages = messages.filter((m) => m && m.role && m.content);
-      const agent = new (wasm as any).WasmAgent(
-        JSON.stringify({
-          default_provider: provider,
-          default_model: model,
-          default_temperature: temperature,
-        }),
-      );
-
-      const builtMessagesJson = agent.build_messages(
-        JSON.stringify(cleanMessages),
-        JSON.stringify(memoriesArr),
-        identityPrompt,
-        new Date().toLocaleString(),
-      );
-
-      agent.free();
-
-      // Get tool definitions
-      const toolRegistry = new (wasm as any).WasmToolRegistry();
-      const toolsJson = toolRegistry.to_llm_json();
-      console.log("[EZ-Claw] Tools JSON:", toolsJson.slice(0, 500));
-      toolRegistry.free();
-
-      const providerConfig: ProviderConfig = {
+      const providerConfig = {
         provider,
         apiKey,
         model,
@@ -203,323 +116,23 @@
         apiUrl: apiUrl || undefined,
       };
 
-      // ── Agentic Loop ──
-      // Step 1: Make a non-streaming call with tools to check for tool_calls
-      // Step 2: If tool_calls → execute them, add results, loop back
-      // Step 3: When no tool_calls → stream the final text response
+      // 2. Dispatch to Background Worker
+      runClawTask(sessionId || "default", {
+        messages: messages.filter(m => m.role && m.content),
+        providerConfig,
+        identityPrompt,
+        memories: memoriesArr,
+      });
 
-      let loopMessages = JSON.parse(builtMessagesJson);
-      const maxIterations = 10;
-      let finalAssistantContent = "";
-
-      try {
-        for (let i = 0; i < maxIterations; i++) {
-          toolActivity = i > 0 ? "Thinking..." : "";
-
-          // Non-streaming request WITH tools
-          const requestBody = wasm.build_provider_request_with_tools(
-            JSON.stringify(loopMessages),
-            model,
-            temperature,
-            false, // non-streaming for tool calls
-            toolsJson,
-          );
-
-          let baseUrl = apiUrl || wasm.provider_base_url(provider);
-          const endpoint = `${baseUrl}/chat/completions`;
-          const headers = buildProviderHeaders(provider, apiKey);
-
-          const response = await fetch(endpoint, {
-            method: "POST",
-            headers,
-            body: requestBody,
-          });
-
-          if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`API error ${response.status}: ${errText}`);
-          }
-
-          const data = await response.json();
-          const choice = data.choices?.[0];
-          if (!choice) throw new Error("No response from model");
-
-          const assistantMsg = choice.message;
-          console.log("[EZ-Claw] Response:", JSON.stringify(assistantMsg));
-
-          // ── Real-time UI Update (Assistant Step) ──
-          messages = [...messages, assistantMsg];
-          loopMessages.push(assistantMsg);
-          finalAssistantContent = assistantMsg.content || "";
-          await scrollToBottom();
-
-          // Check for tool calls
-          if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
-            // Execute each tool call
-            for (const tc of assistantMsg.tool_calls) {
-              const toolName = tc.function?.name || tc.name || "unknown";
-              const toolArgs = tc.function?.arguments || tc.arguments || "{}";
-              const toolId = tc.id || crypto.randomUUID();
-
-              toolActivity = `🔧 Running: ${toolName}...`;
-              await scrollToBottom();
-
-              let result: string;
-              try {
-                const args = JSON.parse(toolArgs);
-                result = await dispatchToolDirect(toolName, args);
-              } catch (e: any) {
-                result = `Error: ${e.message}`;
-              }
-
-              // ── Real-time UI Update (Tool Result) ──
-              const toolResultMsg = {
-                role: "tool",
-                tool_call_id: toolId,
-                name: toolName,
-                content: result,
-              };
-              messages = [...messages, toolResultMsg];
-              loopMessages.push(toolResultMsg);
-              await scrollToBottom();
-            }
-
-            // Continue the loop — model will see tool results and decide what to do next
-            continue;
-          }
-
-          // No more tool calls → final state reached
-          break;
-        }
-
-        toolActivity = "";
-        isStreaming = false;
-        streamingContent = "";
-
-        // Auto-save session (now includes full tool history)
-        if (sessionId) {
-          const session: SessionData = {
-            id: sessionId,
-            title: generateTitle(messages),
-            clawName: "",
-            emoji: "🦀",
-            personaId: null,
-            skillSetId: null,
-            status: "running" as const,
-            messages: messages.map((m) => ({
-              role: m.role,
-              content: m.content || "",
-              tool_calls: m.tool_calls,
-              tool_call_id: m.tool_call_id,
-              name: m.name,
-            })),
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            model,
-            provider,
-          };
-          await saveSession(session);
-          onSessionUpdate(session);
-        }
-
-        // Auto-store conversation to memory
-        try {
-          storeMemory(
-            `chat-${Date.now()}`,
-            `User: ${text}\nAssistant: ${finalAssistantContent.slice(0, 200)}`,
-            "conversation",
-            sessionId || "",
-          );
-        } catch {
-          /* Memory not ready */
-        }
-
-        await scrollToBottom();
-      } catch (err) {
-        throw err; // Re-throw to the outer catch block
-      }
-
-      // If we exhausted max iterations, show what we have
-      toolActivity = "";
-      isStreaming = false;
-      messages = [
-        ...messages,
-        {
-          role: "assistant",
-          content: "⚠️ Reached maximum tool execution depth. Please try again.",
-        },
-      ];
     } catch (err) {
-      messages = [
-        ...messages,
-        {
-          role: "assistant",
-          content: `❌ **Error:** ${err instanceof Error ? err.message : String(err)}`,
-        },
-      ];
+      messages = [...messages, {
+        role: "assistant",
+        content: `❌ **Error:** ${err instanceof Error ? err.message : String(err)}`,
+      }];
+    } finally {
+      // Note: isStreaming and toolActivity will eventually be driven by worker events
       isStreaming = false;
-      streamingContent = "";
       toolActivity = "";
-    }
-  }
-
-  /**
-   * Direct tool dispatch without WASM security pipeline (simplified for now).
-   * TODO: wire through full executeToolCall with WASM agent security checks.
-   */
-  async function dispatchToolDirect(
-    name: string,
-    args: Record<string, any>,
-  ): Promise<string> {
-    switch (name) {
-      case "web_search": {
-        const query = args.query || "";
-        const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-        const res = await fetch(url);
-        const data = await res.json();
-        const results: string[] = [];
-        if (data.Abstract)
-          results.push(
-            `**Summary**: ${data.Abstract}\nSource: ${data.AbstractURL}`,
-          );
-        if (data.RelatedTopics) {
-          for (const topic of data.RelatedTopics.slice(0, 5)) {
-            if (topic.Text)
-              results.push(
-                `- ${topic.Text}${topic.FirstURL ? ` (${topic.FirstURL})` : ""}`,
-              );
-          }
-        }
-        return results.length > 0
-          ? results.join("\n\n")
-          : `No results for: "${query}"`;
-      }
-
-      case "web_fetch": {
-        const res = await fetch(args.url);
-        const text = await res.text();
-        const cleaned = text
-          .replace(/<[^>]*>/g, " ")
-          .replace(/\s+/g, " ")
-          .trim();
-        return cleaned.slice(0, 10000);
-      }
-
-      case "memory_store": {
-        const key = args.key || `mem-${Date.now()}`;
-        const content = args.content || args.value || "";
-        const category = args.category || "core";
-        try {
-          storeMemory(key, content, category);
-          return `Memory stored: key="${key}", category="${category}"`;
-        } catch (e: any) {
-          return `Memory store failed: ${e.message}`;
-        }
-      }
-
-      case "memory_recall": {
-        try {
-          const results = recallMemories(args.query || "", args.limit || 5);
-          if (results.length === 0)
-            return `No memories found for: "${args.query}"`;
-          return results
-            .map((m) => `[${m.category}] ${m.key}: ${m.content}`)
-            .join("\n");
-        } catch (e: any) {
-          return `Memory recall failed: ${e.message}`;
-        }
-      }
-
-      case "update_identity": {
-        const identity = loadIdentity();
-        if (args.name) {
-          identity.name = args.name;
-          identity.facts["name"] = args.name;
-        }
-        if (args.personality) identity.personality = args.personality;
-        if (args.instructions) identity.instructions = args.instructions;
-        if (args.creature) identity.creature = args.creature;
-        if (args.vibe) identity.vibe = args.vibe;
-        if (args.emoji) identity.emoji = args.emoji;
-        if (args.fact_key && args.fact_value) {
-          identity.facts[args.fact_key] = args.fact_value;
-        }
-        // Save directly (already imported at top level)
-        saveIdentity(identity);
-        // Mark bootstrapped if the agent set a name (first-run complete)
-        if (args.name && !identity.bootstrapped) {
-          markBootstrapped();
-        }
-        // Also persist to memory
-        try {
-          if (args.name)
-            storeMemory("identity_name", `My name is ${args.name}`, "identity");
-          if (args.personality)
-            storeMemory("identity_personality", args.personality, "identity");
-          if (args.creature)
-            storeMemory("identity_creature", args.creature, "identity");
-          if (args.fact_key)
-            storeMemory(
-              `identity_${args.fact_key}`,
-              args.fact_value,
-              "identity",
-            );
-        } catch {
-          /* silent */
-        }
-        return `Identity updated successfully: ${JSON.stringify(identity, null, 2)}`;
-      }
-
-      case "read_file": {
-        try {
-          const ws = getSharedWorkspace();
-          const content = ws.read_file(args.path || "");
-          return content;
-        } catch (e: any) {
-          return `read_file error: ${e.message}`;
-        }
-      }
-
-      case "write_file": {
-        try {
-          const ws = getSharedWorkspace();
-          ws.write_file(args.path || "", args.content || "");
-          return `File written: ${args.path} (${(args.content || "").length} bytes)`;
-        } catch (e: any) {
-          return `write_file error: ${e.message}`;
-        }
-      }
-
-      case "list_dir": {
-        try {
-          const ws = getSharedWorkspace();
-          const json = ws.list_dir(args.path || "/");
-          const entries = JSON.parse(json);
-          if (entries.length === 0) return "(empty directory)";
-          return entries
-            .map(
-              (e: any) =>
-                `${e.is_dir ? "📁" : "📄"} ${e.name}${e.is_dir ? "/" : ` (${e.size}b)`}`,
-            )
-            .join("\n");
-        } catch (e: any) {
-          return `list_dir error: ${e.message}`;
-        }
-      }
-
-      case "shell_exec": {
-        const sandbox = getSandbox();
-        const result = await sandbox.execute(args.command || "");
-        let output = "";
-        if (result.stdout) output += result.stdout;
-        if (result.stderr)
-          output += (output ? "\n" : "") + `STDERR: ${result.stderr}`;
-        if (result.timedOut) output += "\n(command timed out)";
-        return output || "(no output)";
-      }
-
-      default:
-        return `Unknown tool: ${name}`;
     }
   }
 
