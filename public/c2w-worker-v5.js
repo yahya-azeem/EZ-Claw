@@ -254,8 +254,46 @@ function createWasiShim(image) {
             return 0; 
         },
         poll_oneoff: (inPtr, outPtr, n, res) => { 
-            emitMsg('log', { message: `WASI poll_oneoff(n=${n})` });
-            new DataView(getMem().buffer).setUint32(res, 0, true); 
+            const mem = getMem();
+            const view = new DataView(mem.buffer);
+            let eventsCount = 0;
+
+            for (let i = 0; i < n; i++) {
+                const subPtr = inPtr + i * 48; // subscription is 48 bytes
+                const userData = view.getBigUint64(subPtr, true);
+                const type = view.getUint8(subPtr + 8);
+
+                if (type === 1) { // FD_READ
+                    const fd = view.getUint32(subPtr + 16, true);
+                    if (fd === 0) {
+                        // Check if stdin has data
+                        let hasData = (sharedStdinPointers && Atomics.load(sharedStdinPointers, 0) !== Atomics.load(sharedStdinPointers, 1)) || stdinBuffer.length > 0;
+                        
+                        // If no data and we are the only poll, wait a bit to save CPU
+                        if (!hasData && n === 1 && sharedStdinPointers) {
+                            const write = Atomics.load(sharedStdinPointers, 1);
+                            try { Atomics.wait(sharedStdinPointers, 1, write, 100); } catch(e) {}
+                            hasData = Atomics.load(sharedStdinPointers, 0) !== Atomics.load(sharedStdinPointers, 1);
+                        }
+
+                        if (hasData) {
+                            const eventPtr = outPtr + eventsCount * 32; // event is 32 bytes
+                            view.setBigUint64(eventPtr, userData, true);
+                            view.setUint16(eventPtr + 8, 0, true); // errno: 0
+                            view.setUint8(eventPtr + 10, 1); // type: FD_READ
+                            eventsCount++;
+                        }
+                    }
+                } else if (type === 0) { // CLOCK
+                    // Signal clock events immediately to keep the kernel moving
+                    const eventPtr = outPtr + eventsCount * 32;
+                    view.setBigUint64(eventPtr, userData, true);
+                    view.setUint16(eventPtr + 8, 0, true);
+                    view.setUint8(eventPtr + 10, 0); // type: CLOCK
+                    eventsCount++;
+                }
+            }
+            view.setUint32(res, eventsCount, true);
             return 0; 
         },
         fd_close: (fd) => { 

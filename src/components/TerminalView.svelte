@@ -26,7 +26,7 @@
     async function initTerminal() {
         if (!termContainer || term) return;
 
-        console.log(`[EZ-Claw] Initializing TerminalView (v2.6-trace) | isolated=${window.crossOriginIsolated}`);
+        console.log(`[EZ-Claw] Initializing TerminalView (v2.6) | isolated=${window.crossOriginIsolated}`);
 
         term = new Terminal({
             cursorBlink: true,
@@ -60,13 +60,12 @@
         term.focus();
 
         term.onData((data) => {
-            console.log(`[EZ-Claw] Terminal onData (raw): ${JSON.stringify(data)}`);
             if (manager) {
                 manager.sendStdin(data);
             }
         });
 
-        term.writeln("\x1b[1;34m🦀 EZ-TERM 2.6 (Trace) — Secure Sandbox\x1b[0m");
+        term.writeln("\x1b[1;34m🦀 EZ-TERM 2.6 — Secure Sandbox\x1b[0m");
         term.writeln("\x1b[2mInteractive Alpine Linux session active. Type directly below.\x1b[0m\n");
     }
 
