@@ -209,94 +209,94 @@
       // Step 3: When no tool_calls → stream the final text response
 
       let loopMessages = JSON.parse(builtMessagesJson);
-      let maxIterations = 10;
+      const maxIterations = 10;
+      let finalAssistantContent = "";
 
-      for (let i = 0; i < maxIterations; i++) {
-        toolActivity = i > 0 ? "Thinking..." : "";
+      try {
+        for (let i = 0; i < maxIterations; i++) {
+          toolActivity = i > 0 ? "Thinking..." : "";
 
-        // Non-streaming request WITH tools
-        const requestBody = wasm.build_provider_request_with_tools(
-          JSON.stringify(loopMessages),
-          model,
-          temperature,
-          false, // non-streaming for tool calls
-          toolsJson,
-        );
-
-        let baseUrl = apiUrl || wasm.provider_base_url(provider);
-        const endpoint = `${baseUrl}/chat/completions`;
-        const headers = buildProviderHeaders(provider, apiKey);
-
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers,
-          body: requestBody,
-        });
-
-        if (!response.ok) {
-          const errText = await response.text();
-          throw new Error(`API error ${response.status}: ${errText}`);
-        }
-
-        const data = await response.json();
-        const choice = data.choices?.[0];
-
-        if (!choice) throw new Error("No response from model");
-
-        const assistantMsg = choice.message;
-
-        // Debug: log what we got
-        console.log("[EZ-Claw] Response:", JSON.stringify(assistantMsg));
-
-        // Check for tool calls
-        if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
-          console.log(
-            "[EZ-Claw] Tool calls detected:",
-            assistantMsg.tool_calls,
+          // Non-streaming request WITH tools
+          const requestBody = wasm.build_provider_request_with_tools(
+            JSON.stringify(loopMessages),
+            model,
+            temperature,
+            false, // non-streaming for tool calls
+            toolsJson,
           );
-          // Add the assistant message with tool_calls to the loop
-          loopMessages.push(assistantMsg);
 
-          // Execute each tool call
-          for (const tc of assistantMsg.tool_calls) {
-            const toolName = tc.function?.name || tc.name || "unknown";
-            const toolArgs = tc.function?.arguments || tc.arguments || "{}";
-            const toolId = tc.id || crypto.randomUUID();
+          let baseUrl = apiUrl || wasm.provider_base_url(provider);
+          const endpoint = `${baseUrl}/chat/completions`;
+          const headers = buildProviderHeaders(provider, apiKey);
 
-            toolActivity = `🔧 Running: ${toolName}...`;
-            await scrollToBottom();
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers,
+            body: requestBody,
+          });
 
-            // Execute through the simplified dispatch (no WASM agent needed for dispatch)
-            let result: string;
-            try {
-              const args = JSON.parse(toolArgs);
-              console.log("[EZ-Claw] Executing tool:", toolName, args);
-              result = await dispatchToolDirect(toolName, args);
-              console.log("[EZ-Claw] Tool result:", result.slice(0, 200));
-            } catch (e: any) {
-              result = `Error: ${e.message}`;
-            }
-
-            // Add tool result to loop messages (OpenAI format)
-            loopMessages.push({
-              role: "tool",
-              tool_call_id: toolId,
-              content: result,
-            });
+          if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`API error ${response.status}: ${errText}`);
           }
 
-          // Continue the loop — model will see tool results and decide what to do next
-          continue;
+          const data = await response.json();
+          const choice = data.choices?.[0];
+          if (!choice) throw new Error("No response from model");
+
+          const assistantMsg = choice.message;
+          console.log("[EZ-Claw] Response:", JSON.stringify(assistantMsg));
+
+          // ── Real-time UI Update (Assistant Step) ──
+          messages = [...messages, assistantMsg];
+          loopMessages.push(assistantMsg);
+          finalAssistantContent = assistantMsg.content || "";
+          await scrollToBottom();
+
+          // Check for tool calls
+          if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
+            // Execute each tool call
+            for (const tc of assistantMsg.tool_calls) {
+              const toolName = tc.function?.name || tc.name || "unknown";
+              const toolArgs = tc.function?.arguments || tc.arguments || "{}";
+              const toolId = tc.id || crypto.randomUUID();
+
+              toolActivity = `🔧 Running: ${toolName}...`;
+              await scrollToBottom();
+
+              let result: string;
+              try {
+                const args = JSON.parse(toolArgs);
+                result = await dispatchToolDirect(toolName, args);
+              } catch (e: any) {
+                result = `Error: ${e.message}`;
+              }
+
+              // ── Real-time UI Update (Tool Result) ──
+              const toolResultMsg = {
+                role: "tool",
+                tool_call_id: toolId,
+                name: toolName,
+                content: result,
+              };
+              messages = [...messages, toolResultMsg];
+              loopMessages.push(toolResultMsg);
+              await scrollToBottom();
+            }
+
+            // Continue the loop — model will see tool results and decide what to do next
+            continue;
+          }
+
+          // No more tool calls → final state reached
+          break;
         }
 
-        // No tool calls → we have the final text response
-        const finalText = assistantMsg.content || "";
-        messages = [...messages, { role: "assistant", content: finalText }];
         toolActivity = "";
         isStreaming = false;
         streamingContent = "";
 
-        // Auto-save session
+        // Auto-save session (now includes full tool history)
         if (sessionId) {
           const session: SessionData = {
             id: sessionId,
@@ -308,7 +308,10 @@
             status: "running" as const,
             messages: messages.map((m) => ({
               role: m.role,
-              content: m.content,
+              content: m.content || "",
+              tool_calls: m.tool_calls,
+              tool_call_id: m.tool_call_id,
+              name: m.name,
             })),
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -323,7 +326,7 @@
         try {
           storeMemory(
             `chat-${Date.now()}`,
-            `User: ${text}\nAssistant: ${finalText.slice(0, 200)}`,
+            `User: ${text}\nAssistant: ${finalAssistantContent.slice(0, 200)}`,
             "conversation",
             sessionId || "",
           );
@@ -332,7 +335,8 @@
         }
 
         await scrollToBottom();
-        return; // Done
+      } catch (err) {
+        throw err; // Re-throw to the outer catch block
       }
 
       // If we exhausted max iterations, show what we have
@@ -580,7 +584,7 @@
     {/if}
 
     {#each messages as msg, i (i)}
-      <MessageBubble role={msg.role} content={msg.content} />
+      <MessageBubble {...msg} />
     {/each}
 
     {#if isStreaming && streamingContent}

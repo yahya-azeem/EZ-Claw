@@ -2,13 +2,16 @@
   interface Props {
     role: string;
     content: string;
+    name?: string;
+    tool_calls?: any[];
     isStreaming?: boolean;
   }
 
-  let { role, content, isStreaming = false }: Props = $props();
+  let { role, content, name, tool_calls, isStreaming = false }: Props = $props();
 
   // Simple markdown rendering (code blocks, bold, italic, links)
   function renderMarkdown(text: string): string {
+    if (!text) return "";
     let html = text
       // Code blocks
       .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="lang-$1">$2</code></pre>')
@@ -27,25 +30,55 @@
   }
 </script>
 
-<div class="message" class:user={role === 'user'} class:assistant={role === 'assistant'}>
+<div 
+  class="message" 
+  class:user={role === 'user'} 
+  class:assistant={role === 'assistant'} 
+  class:tool={role === 'tool'}
+>
   <div class="message-avatar">
     {#if role === 'user'}
       <div class="avatar avatar-user">U</div>
-    {:else}
+    {:else if role === 'assistant'}
       <div class="avatar avatar-assistant">🦀</div>
+    {:else}
+      <div class="avatar avatar-tool">⚙️</div>
     {/if}
   </div>
 
   <div class="message-body">
     <div class="message-role">
-      {role === 'user' ? 'You' : 'EZ-Claw'}
+      {#if role === 'user'}
+        You
+      {:else if role === 'assistant'}
+        EZ-Claw
+      {:else}
+        Work Log: {name || 'Action'}
+      {/if}
     </div>
-    <div class="message-content">
-      {#if isStreaming && !content}
+
+    {#if tool_calls && tool_calls.length > 0}
+      <div class="tool-calls">
+        {#each tool_calls as tc}
+          <div class="tool-call-item">
+            <div class="tool-call-header">
+              <span class="tool-icon">🔧</span>
+              <span class="tool-name">Action: {tc.function?.name || tc.name}</span>
+            </div>
+            {#if tc.function?.arguments || tc.arguments}
+              <pre class="tool-args">{tc.function?.arguments || tc.arguments}</pre>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    {/if}
+
+    <div class="message-content" class:terminal={role === 'tool' && (name === 'shell_exec' || name === 'run_shell_command')}>
+      {#if isStreaming && !content && (!tool_calls || tool_calls.length === 0)}
         <div class="typing-indicator">
           <span></span><span></span><span></span>
         </div>
-      {:else}
+      {:else if content}
         {@html renderMarkdown(content)}
         {#if isStreaming}
           <span class="cursor-blink">▊</span>
@@ -66,15 +99,19 @@
     width: 100%;
   }
 
-  .message.user {
-    /* User messages slightly different bg */
-  }
-
   .message.assistant {
     background: rgba(30, 41, 59, 0.3);
     border-radius: var(--radius-lg);
     margin-top: var(--space-xs);
     margin-bottom: var(--space-xs);
+  }
+
+  .message.tool {
+    background: rgba(15, 23, 42, 0.2);
+    border-left: 3px solid var(--accent-primary);
+    padding: var(--space-md) var(--space-xl);
+    font-size: 0.95em;
+    opacity: 0.85;
   }
 
   .message-avatar {
@@ -103,6 +140,12 @@
     font-size: 18px;
   }
 
+  .avatar-tool {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    font-size: 14px;
+  }
+
   .message-body {
     flex: 1;
     min-width: 0;
@@ -124,12 +167,59 @@
     overflow-wrap: break-word;
   }
 
+  .message-content.terminal {
+    background: #0f172a;
+    color: #38bdf8;
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    white-space: pre-wrap;
+    border: 1px solid #1e293b;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+    margin-top: var(--space-sm);
+  }
+
+  .tool-calls {
+    margin-bottom: var(--space-sm);
+  }
+
+  .tool-call-item {
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm);
+    margin-bottom: var(--space-xs);
+  }
+
+  .tool-call-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: 0.85em;
+    font-weight: 600;
+    color: var(--text-accent);
+  }
+
+  .tool-args {
+    margin: var(--space-xs) 0 0 0;
+    font-size: 0.8em;
+    color: var(--text-secondary);
+    background: rgba(0,0,0,0.2);
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+  }
+
   .message-content :global(pre) {
     margin: var(--space-sm) 0;
   }
 
   .message-content :global(code) {
-    font-size: 0.85em;
+    font-family: var(--font-mono);
+    background: rgba(255, 255, 255, 0.1);
+    padding: 2px 4px;
+    border-radius: 4px;
   }
 
   .message-content :global(strong) {

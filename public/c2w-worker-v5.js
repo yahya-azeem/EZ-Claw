@@ -51,28 +51,24 @@ async function handleLoad(payload) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const contentLength = Number(response.headers.get('content-length') || 0);
-    const reader = response.body?.getReader();
-    let bytes;
+    let received = 0;
 
-    if (reader && contentLength > 0) {
-        const chunks = [];
-        let received = 0;
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            chunks.push(value); received += value.length;
+    // Monitor progress without blocking compilation
+    const progressStream = new TransformStream({
+        transform(chunk, controller) {
+            received += chunk.length;
             const pct = contentLength > 0 ? Math.min(100, Math.round((received / contentLength) * 100)) : 0;
             emitMsg('progress', { loaded: received, total: contentLength, percent: pct });
+            controller.enqueue(chunk);
         }
-        bytes = new Uint8Array(received);
-        let offset = 0;
-        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
-    } else {
-        bytes = new Uint8Array(await response.arrayBuffer());
-    }
+    });
 
     const wasi = createWasiShim(image);
-    const result = await WebAssembly.instantiate(bytes, { wasi_snapshot_preview1: wasi, wasi_unstable: wasi });
+    // Parallel download + compile — this is much faster for large binaries
+    const result = await WebAssembly.instantiateStreaming(
+        response.body.pipeThrough(progressStream), 
+        { wasi_snapshot_preview1: wasi, wasi_unstable: wasi }
+    );
     wasmInstance = result.instance;
     emitMsg('log', { message: 'WASM Instance created, signaling ready' });
     emitMsg('ready');
