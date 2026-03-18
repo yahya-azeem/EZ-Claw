@@ -1,5 +1,5 @@
 /**
- * C2W Web Worker v3 — background Linux kernel execution.
+ * C2W Web Worker v5 — background Linux kernel execution.
  * 
  * Served from /public to avoid Vite transformation issues.
  */
@@ -123,6 +123,9 @@ function createWasiShim(image) {
             return 0;
         },
         fd_read: (fd, iovs, iovsLen, nread) => {
+            if (fd === 0) {
+                emitMsg('log', { message: `fd_read called for stdin (fd 0)` });
+            }
             if (fd !== 0) return 8;
             const mem = getMem();
             const view = new DataView(mem.buffer);
@@ -154,10 +157,14 @@ function createWasiShim(image) {
                                 if (read === write) break; 
                             }
 
-                            memUint8[ptr + j] = sharedStdinUint8[read];
+                            let char = sharedStdinUint8[read];
+                            // Map \r (13) to \n (10) for Linux compatibility
+                            if (char === 13) char = 10;
+
+                            memUint8[ptr + j] = char;
                             Atomics.store(sharedStdinPointers, 0, (read + 1) % 1024);
                             totalRead++;
-                            emitMsg('log', { message: `fd_read consumed byte ${memUint8[ptr+j]} from SAB` });
+                            emitMsg('log', { message: `fd_read consumed byte ${char} from SAB` });
                         }
                         if (totalRead > 0) break;
                     }

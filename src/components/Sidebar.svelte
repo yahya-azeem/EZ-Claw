@@ -122,7 +122,10 @@
   <!-- New Claw Button / Form -->
   {#if showNewClawForm}
     <div class="new-claw-form">
+      <label for="new-claw-name" class="field-label">Claw Name</label>
       <input
+        id="new-claw-name"
+        name="claw-name"
         type="text"
         class="claw-name-input"
         bind:value={newClawName}
@@ -130,12 +133,12 @@
         onkeydown={handleKeydown}
       />
       <div class="clone-row">
-        <label class="clone-label">
-          <input type="checkbox" bind:checked={showCloneDropdown} />
+        <label class="clone-label" for="clone-checkbox">
+          <input id="clone-checkbox" name="is-clone" type="checkbox" bind:checked={showCloneDropdown} />
           Clone from existing
         </label>
         {#if showCloneDropdown && sessions.length > 0}
-          <select class="clone-select" bind:value={cloneFromId}>
+          <select id="clone-claw-id" name="clone-source" class="clone-select" bind:value={cloneFromId}>
             <option value="">— Select —</option>
             {#each sessions as s}
               <option value={s.id}

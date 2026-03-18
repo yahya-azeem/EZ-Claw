@@ -286,8 +286,10 @@
                         </div>
 
                         <div class="form-group">
-                            <label>Bot Name</label>
+                            <label for="channel-name">Bot Name</label>
                             <input
+                                id="channel-name"
+                                name="chan-name"
                                 type="text"
                                 bind:value={addName}
                                 placeholder={`My ${addType} Bot`}
@@ -295,7 +297,7 @@
                         </div>
 
                         <div class="form-group">
-                            <label>
+                            <label for="channel-token">
                                 {#if addType === "telegram"}Bot Token (from
                                     @BotFather)
                                 {:else if addType === "discord"}Bot Token (from
@@ -304,6 +306,8 @@
                                 {/if}
                             </label>
                             <input
+                                id="channel-token"
+                                name="chan-token"
                                 type="password"
                                 bind:value={addToken}
                                 placeholder={addType === "slack"
@@ -314,8 +318,10 @@
 
                         {#if addType === "slack"}
                             <div class="form-group">
-                                <label>Bot OAuth Token (xoxb-...)</label>
+                                <label for="channel-bot-token">Bot OAuth Token (xoxb-...)</label>
                                 <input
+                                    id="channel-bot-token"
+                                    name="chan-bot-token"
                                     type="password"
                                     bind:value={addBotToken}
                                     placeholder="xoxb-..."

@@ -70,7 +70,10 @@ async function saveToIDB(): Promise<void> {
 export async function initMemory(): Promise<void> {
     try {
         const SQL = await initSqlJs({
-            locateFile: (file: string) => `https://unpkg.com/sql.js@1.11.0/dist/${file}`,
+            locateFile: (file: string) => {
+                if (file.endsWith('.wasm')) return `https://cdn.jsdelivr.net/npm/sql.js@1.11.0/dist/sql-wasm.wasm`;
+                return `https://cdn.jsdelivr.net/npm/sql.js@1.11.0/dist/${file}`;
+            },
         });
 
         // Try to restore from IndexedDB first
@@ -114,7 +117,10 @@ async function initSqlJs(config?: any): Promise<any> {
  */
 export async function loadMemoryFromData(data: Uint8Array): Promise<void> {
     const SQL = await initSqlJs({
-        locateFile: (file: string) => `https://unpkg.com/sql.js@1.11.0/dist/${file}`,
+        locateFile: (file: string) => {
+            if (file.endsWith('.wasm')) return `https://cdn.jsdelivr.net/npm/sql.js@1.11.0/dist/sql-wasm.wasm`;
+            return `https://cdn.jsdelivr.net/npm/sql.js@1.11.0/dist/${file}`;
+        },
     });
 
     sqlDb = new SQL.Database(data);
