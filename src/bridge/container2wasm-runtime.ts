@@ -230,6 +230,7 @@ export class C2WRuntime {
 
                 this.stdinUint8[write] = bytes[i];
                 Atomics.store(this.stdinPointers, 1, nextWrite);
+                console.log(`[EZ-Claw] Stdin wrote byte ${bytes[i]} to SAB at index ${write}`);
             }
             Atomics.notify(this.stdinPointers, 1); // Notify any waiter on write index
         } else {

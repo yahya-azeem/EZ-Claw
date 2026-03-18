@@ -157,6 +157,7 @@ function createWasiShim(image) {
                             memUint8[ptr + j] = sharedStdinUint8[read];
                             Atomics.store(sharedStdinPointers, 0, (read + 1) % 1024);
                             totalRead++;
+                            emitMsg('log', { message: `fd_read consumed byte ${memUint8[ptr+j]} from SAB` });
                         }
                         if (totalRead > 0) break;
                     }
