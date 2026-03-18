@@ -66,7 +66,9 @@ async function handleLoad(payload) {
     const wasi = createWasiShim(image);
     // Parallel download + compile — this is much faster for large binaries
     const result = await WebAssembly.instantiateStreaming(
-        response.body.pipeThrough(progressStream), 
+        new Response(response.body.pipeThrough(progressStream), {
+            headers: { "Content-Type": "application/wasm" }
+        }), 
         { wasi_snapshot_preview1: wasi, wasi_unstable: wasi }
     );
     wasmInstance = result.instance;
