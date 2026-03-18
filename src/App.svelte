@@ -145,41 +145,26 @@
       initOrchestrator();
       initCloudSync();
 
-      // Try to initialize WASM
+      // Initialize WASM core
       try {
         await initWasm();
         wasmReady = true;
 
-        // Initialize memory system (sql.js)
-        try {
-          // Try to load saved memory from IndexedDB
-          const savedMemory = await loadSavedMemory();
-          if (savedMemory) {
+        // Initialize memory system (Native JSON store)
+        const savedMemory = await loadSavedMemory();
+        if (savedMemory) {
             await loadMemoryFromData(savedMemory);
             console.log("[EZ-Claw] Memory restored from IndexedDB");
-          } else {
+        } else {
             await initMemory();
-          }
-          // Auto-save memory every 30 seconds
-          memoryAutoSaveId = setInterval(
-            persistMemory,
-            30000,
-          ) as unknown as number;
-        } catch (memErr) {
-          console.warn("[EZ-Claw] Memory init failed:", memErr);
-          // Try fresh init
-          try {
-            await initMemory();
-          } catch {
-            /* silent */
-          }
         }
-      } catch (wasmErr) {
-        console.warn(
-          "[EZ-Claw] WASM load failed, running in degraded mode:",
-          wasmErr,
-        );
-        initError = `WASM load failed: ${wasmErr instanceof Error ? wasmErr.message : String(wasmErr)}`;
+
+        // Auto-save memory every 30 seconds
+        memoryAutoSaveId = setInterval(persistMemory, 30000) as unknown as number;
+
+      } catch (err) {
+        console.warn("[EZ-Claw] Initialization error:", err);
+        initError = `Initialization error: ${err instanceof Error ? err.message : String(err)}`;
       }
 
       // Load saved config
