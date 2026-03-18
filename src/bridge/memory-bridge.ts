@@ -69,12 +69,16 @@ async function saveToIDB(): Promise<void> {
  */
 export async function initMemory(): Promise<void> {
     try {
-        const SQL = await initSqlJs({
-            locateFile: (file: string) => {
-                if (file.endsWith('.wasm')) return `https://cdn.jsdelivr.net/npm/sql.js@1.11.0/dist/sql-wasm.wasm`;
-                return `https://cdn.jsdelivr.net/npm/sql.js@1.11.0/dist/${file}`;
-            },
+        // Add a 5-second timeout to initSqlJs to avoid "forever stuck" loading
+        const sqlInitPromise = initSqlJs({
+            locateFile: (file: string) => `./${file}`,
         });
+
+        const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('initSqlJs timed out after 5s')), 5000)
+        );
+
+        const SQL = await Promise.race([sqlInitPromise, timeoutPromise]) as any;
 
         // Try to restore from IndexedDB first
         const savedData = await loadFromIDB();
@@ -117,10 +121,7 @@ async function initSqlJs(config?: any): Promise<any> {
  */
 export async function loadMemoryFromData(data: Uint8Array): Promise<void> {
     const SQL = await initSqlJs({
-        locateFile: (file: string) => {
-            if (file.endsWith('.wasm')) return `https://cdn.jsdelivr.net/npm/sql.js@1.11.0/dist/sql-wasm.wasm`;
-            return `https://cdn.jsdelivr.net/npm/sql.js@1.11.0/dist/${file}`;
-        },
+        locateFile: (file: string) => `./${file}`,
     });
 
     sqlDb = new SQL.Database(data);
