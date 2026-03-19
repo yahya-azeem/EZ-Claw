@@ -1,14 +1,15 @@
 /**
- * Claw Orchestrator v7.0 — Background Proxy Edition
+ * Claw Orchestrator v8.0 — Centralized Worker Proxy Edition
  *
- * Each Claw is a named AI agent. This orchestrator now acts as a 
- * proxy for the 'claw-worker.ts' SharedWorker, which handles the 
- * actual WASM execution in the background.
+ * This version removes all local tab-based sync logic (WebSocket, 
+ * Leader Election) and delegates everything to the SharedWorker.
+ * The orchestrator now acts as a thin proxy for the central state.
  */
 
 import {
     swapPersona,
     getActivePersonaId,
+    listPersonas
 } from '../layers/persona-layer';
 import {
     swapSkillSet,
@@ -16,89 +17,18 @@ import {
     listSkillSets,
     deleteSkillSet,
 } from '../layers/skills-layer';
-import { listPersonas } from '../layers/persona-layer';
-
-// ── WebSocket Sync Bridge ─────────────────────────────────────────
-
-let _ws: WebSocket | null = null;
-
-function _initSync(): void {
-    if (_ws || typeof window === 'undefined') return;
-    
-    try {
-        _ws = new WebSocket('ws://localhost:8080');
-        
-        _ws.onopen = () => {
-            console.log('[Claw Orchestrator] Connected to Bridge Relay');
-            _syncAll();
-        };
-
-        _ws.onmessage = (e) => {
-            try {
-                const { type, payload } = JSON.parse(e.data);
-                handleRemoteCommand(type, payload);
-            } catch {}
-        };
-
-        _ws.onclose = () => {
-            _ws = null;
-            setTimeout(_initSync, 5000); // Reconnect
-        };
-    } catch {
-        // Silent — bridge might not be running
-    }
-}
-
-function _syncAll(): void {
-    if (!_ws || _ws.readyState !== WebSocket.OPEN) return;
-    _ws.send(JSON.stringify({
-        type: 'STATE_SYNC',
-        payload: { claws: Array.from(_claws.values()) }
-    }));
-}
-
-function handleRemoteCommand(type: string, payload: any) {
-    console.log('[Claw Orchestrator] Remote Command:', type, payload);
-    switch (type) {
-        case 'STATE_SYNC_REQ':
-            _syncAll();
-            break;
-        case 'REMOTE_CHAT':
-            const { id, message, providerConfig } = payload;
-            runClawTask(id, { messages: [{ role: 'user', content: message }], providerConfig });
-            break;
-        case 'REMOTE_PANIC':
-            panicFreezeAll();
-            break;
-    }
-}
-
-// ── Types ─────────────────────────────────────────────────────────
+import { getDB, STORES } from './db-bridge';
+import { type SessionData } from './storage-bridge';
+import { EVENTS, WORKER } from './constants';
 
 export type ClawStatus = 'running' | 'frozen' | 'killed';
 
-export interface ClawData {
-    id: string;
-    clawName: string;
-    emoji: string;
-    personaId: string | null;
-    skillSetId: string | null;
-    status: ClawStatus;
-    messages: Array<{ role: string; content: string; name?: string; tool_calls?: any[]; tool_call_id?: string }>;
-    createdAt: string;
-    updatedAt: string;
-    model: string;
-    provider: string;
-}
+// ── Shared State (Mirror of Worker) ───────────────────────────────
 
-// ── Core State ────────────────────────────────────────────────────
-
-let _claws: Map<string, ClawData> = new Map();
+let _claws: Map<string, SessionData> = new Map();
 let _listeners: Array<() => void> = [];
-let _panicActive = false;
-let _worker: SharedWorker | Worker | null = null;
-
-const WIPEOUT_PHRASE = 'WIPEOUT CONFIRM';
+let _worker: any = null;
+let _initPromise: Promise<void> | null = null;
 
 // ── Helpers ───────────────────────────────────────────────────────
 
@@ -106,143 +36,116 @@ function _notify(): void {
     for (const listener of _listeners) listener();
 }
 
-function _persist(): void {
-    try {
-        const data = Array.from(_claws.values());
-        localStorage.setItem('ezclaw_claws', JSON.stringify(data));
-        _syncAll();
-    } catch { /* quota exceeded — silent */ }
-    _notify();
-}
-
-function _load(): void {
-    try {
-        const raw = localStorage.getItem('ezclaw_claws');
-        if (raw) {
-            const arr: ClawData[] = JSON.parse(raw);
-            _claws = new Map(arr.map(c => [c.id, c]));
-        }
-    } catch { /* corrupt data — start fresh */ }
-}
-
 // ── Worker Bridge ─────────────────────────────────────────────────
 
 async function _initWorker(): Promise<any> {
     if (_worker) return _worker;
+    if (_initPromise) return _initPromise;
 
     const workerUrl = new URL('../worker/claw-worker.ts', import.meta.url).href;
 
-    // 0. Native Bridge (Tauri/Electron)
-    if ((window as any).__TAURI__ || (window as any).electron) {
-        console.log('[Claw Orchestrator] Native bridge detected. (Implementation pending for Tauri/Electron IPC)');
-    }
-
-    // 1. Try SharedWorker (Desktop / Android Chrome)
-    if (typeof SharedWorker !== 'undefined') {
-        try {
-            const sw = new SharedWorker(workerUrl, { type: 'module', name: 'EZ-Claw-Worker' });
+    _initPromise = (async () => {
+        if (typeof SharedWorker !== 'undefined') {
+            const sw = new SharedWorker(workerUrl, { type: WORKER.TYPE, name: WORKER.NAME });
             _worker = sw.port as any;
-            (_worker as any).onmessage = (e: MessageEvent) => handleWorkerEvent(e.data);
+            (_worker as any).onmessage = (e: MessageEvent) => _handleWorkerEvent(e.data);
             (_worker as any).start();
-            _worker?.postMessage({ type: 'INIT' });
-            console.log('[Claw Orchestrator] Initialized SharedWorker');
-            return _worker;
-        } catch (e) {
-            console.warn('[Claw Orchestrator] SharedWorker failed:', e);
-        }
-    }
-
-    // 2. Try Service Worker (iOS Safari / PWA Fallback)
-    if ('serviceWorker' in navigator) {
-        try {
-            const reg = await navigator.serviceWorker.register(workerUrl, { type: 'module', scope: '/' });
-            await navigator.serviceWorker.ready;
-            _worker = navigator.serviceWorker.controller || reg.active as any;
             
-            navigator.serviceWorker.onmessage = (e) => handleWorkerEvent(e.data);
-            _worker?.postMessage({ type: 'INIT' });
+            // Initial sync
+            _worker.postMessage({ type: EVENTS.INIT });
+            _worker.postMessage({ type: EVENTS.GET_CLAWS });
             
-            console.log('[Claw Orchestrator] Initialized ServiceWorker');
-            return _worker;
-        } catch (e) {
-            console.warn('[Claw Orchestrator] ServiceWorker failed:', e);
+            console.log('[Claw Orchestrator] Proxy connected to Central Worker');
+        } else {
+            // Fallback for non-SharedWorker environments
+            _worker = new Worker(workerUrl, { type: WORKER.TYPE });
+            _worker.onmessage = (e) => _handleWorkerEvent(e.data);
+            _worker.postMessage({ type: EVENTS.INIT });
         }
-    }
+    })();
 
-    // 3. Fallback: Dedicated Worker
-    console.warn('[Claw Orchestrator] No persistent background worker available. Using Dedicated Worker.');
-    _worker = new Worker(workerUrl, { type: 'module' });
-    _worker.onmessage = (e) => handleWorkerEvent(e.data);
-    _worker.postMessage({ type: 'INIT' });
-    
+    await _initPromise;
     return _worker;
 }
 
-// Internal sync accessor (with lazy init)
-function _getWorkerPort(): any {
-    if (!_worker) {
-        _initWorker(); // Fire and forget init if first access
-    }
-    return (_worker as any)?.port || _worker;
-}
-
-function handleWorkerEvent(event: any) {
+function _handleWorkerEvent(event: any) {
     const { type, payload } = event;
-    console.log('[Claw Orchestrator] Worker Event:', type, payload);
-
+    
     switch (type) {
-        case 'MESSAGE_ADD':
-            const claw = _claws.get(payload.clawId);
-            if (claw) {
-                // Background worker is the source of truth for message order
-                claw.messages = [...claw.messages, payload.message];
-                _persist();
+        case EVENTS.STATE_UPDATED:
+        case EVENTS.INIT_SUCCESS:
+            if (payload && payload.claws) {
+                _claws = new Map(payload.claws.map((c: any) => [c.id, c]));
                 _notify();
             }
             break;
-        case 'TASK_STATUS':
-            // Optional: update UI-only status indicator
+        case EVENTS.MESSAGE_ADD:
+            const claw = _claws.get(payload.clawId);
+            if (claw) {
+                claw.messages = [...claw.messages, payload.message];
+                _notify();
+            }
             break;
-        case 'TASK_COMPLETE':
-            // Task finished naturally
+        case EVENTS.TASK_STATUS: {
+            const claw = _claws.get(payload.clawId);
+            if (claw) {
+                (claw as any).lastStatus = payload.status;
+                _notify();
+            }
             break;
-        case 'ERROR':
-            console.error('[Claw Worker Error]', payload);
+        }
+        case EVENTS.TASK_COMPLETE: {
+            const claw = _claws.get(payload.clawId);
+            if (claw) {
+                (claw as any).lastStatus = null;
+                _notify();
+            }
             break;
+        }
+        case 'ERROR': {
+            const claw = _claws.get(payload.clawId);
+            if (claw) {
+                (claw as any).lastError = payload.message;
+                claw.messages = [...claw.messages, { 
+                    role: 'assistant', 
+                    content: `❌ **Error:** ${payload.message}` 
+                }];
+                _notify();
+            }
+            break;
+        }
+        case 'LOG':
+            console.log(`[Worker Log]`, payload);
+            break;
+    }
+
+    // Handle Requests from Worker
+    if (event.isRequestFromWorker) {
+        _handleWorkerRequest(event);
     }
 }
 
-/** 
- * Proxy task execution to the worker. 
- * This is the primary way the UI triggers AI activity.
- */
-export function runClawTask(id: string, payload: any): void {
-    const port = _getWorkerPort() as any;
-    if (!port) {
-        console.error('[Claw Orchestrator] No worker port available for runClawTask');
-        return;
+async function _handleWorkerRequest(request: any) {
+    const { type, payload, requestId } = request;
+    const port = await _initWorker();
+    
+    try {
+        if (type === 'COPILOT_SDK_CHAT') {
+            // This would normally call the bridge-relay via WebSocket
+            // For now, let's just proxy to the relay if connected
+            throw new Error("SDK proxy not fully implemented in Orchestrator yet");
+        }
+        
+        // port.postMessage({ type: 'RESPONSE', requestId, payload: { ... } });
+    } catch (err: any) {
+        port.postMessage({ type: 'RESPONSE', requestId, error: err.message });
     }
-    port.postMessage({
-        type: 'RUN_TASK',
-        payload: { clawId: id, ...payload }
-    });
 }
 
-/** 🛑 Stop execution in the worker immediately. */
-export function stopClawTask(id: string): void {
-    const port = _getWorkerPort() as any;
-    if (!port) return;
-    port.postMessage({
-        type: 'STOP_TASK',
-        payload: { clawId: id }
-    });
-}
+// ── API (Proxied to Worker) ───────────────────────────────────────
 
-// ── Lifecycle ─────────────────────────────────────────────────────
-
-export function initOrchestrator(): void {
-    _load();
-    _initSync();
+export async function initOrchestrator(): Promise<void> {
+    await _initWorker();
 }
 
 export function onClawsChange(listener: () => void): () => void {
@@ -252,190 +155,95 @@ export function onClawsChange(listener: () => void): () => void {
     };
 }
 
-// ── CRUD (Claw Management) ────────────────────────────────────────
-
-const DEFAULT_EMOJIS = ['🦀', '🐙', '🦑', '🦞', '🦐', '🐍', '🦅', '🐺', '🦊', '🐲'];
-
-function _pickEmoji(): string {
-    return DEFAULT_EMOJIS[_claws.size % DEFAULT_EMOJIS.length];
-}
-
-export function createClaw(
-    name: string,
-    model: string,
-    provider: string,
-    emoji?: string,
-): ClawData {
-    const id = crypto.randomUUID();
-    const claw: ClawData = {
-        id,
-        clawName: name || `Claw ${_claws.size + 1}`,
-        emoji: emoji || _pickEmoji(),
-        personaId: getActivePersonaId(),
-        skillSetId: getActiveSkillSetId(),
-        status: 'running',
-        messages: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        model,
-        provider,
-    };
-    _claws.set(id, claw);
-    _persist();
-    return claw;
-}
-
-export function cloneClaw(
-    fromId: string,
-    newName: string,
-    model: string,
-    provider: string,
-): ClawData | null {
-    const source = _claws.get(fromId);
-    if (!source) return null;
-
-    const id = crypto.randomUUID();
-    const claw: ClawData = {
-        id,
-        clawName: newName || `${source.clawName} (clone)`,
-        emoji: source.emoji,
-        personaId: source.personaId,
-        skillSetId: source.skillSetId,
-        status: 'running',
-        messages: [], 
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        model: model || source.model,
-        provider: provider || source.provider,
-    };
-    _claws.set(id, claw);
-    _persist();
-    return claw;
-}
-
-export function getClaw(id: string): ClawData | undefined {
-    return _claws.get(id);
-}
-
-export function getAllClaws(): ClawData[] {
+export function getAllClaws(): SessionData[] {
     return Array.from(_claws.values())
         .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
-export function updateClaw(id: string, updates: Partial<ClawData>): void {
+export function getClaw(id: string): SessionData | undefined {
+    return _claws.get(id);
+}
+
+export async function createClaw(
+    name: string,
+    model: string,
+    provider: string,
+    emoji?: string,
+    externalId?: string
+): Promise<SessionData> {
+    const id = externalId || crypto.randomUUID();
+    const port = await _initWorker();
+    
+    port.postMessage({
+        type: 'CREATE_CLAW',
+        payload: { id, name, model, provider, emoji }
+    });
+    
+    // Return a optimistic preview (worker will confirm via STATE_UPDATED)
+    return { id, title: name, clawName: name, status: 'running', messages: [], model, provider } as any;
+}
+
+export async function runClawTask(id: string, payload: any): Promise<void> {
+    console.log(`[Orchestrator] runClawTask for ${id}`, payload);
+    const port = await _initWorker();
+    port.postMessage({
+        type: 'RUN_TASK',
+        payload: { clawId: id, ...payload }
+    });
+}
+
+export async function stopClawTask(id: string): Promise<void> {
+    const port = await _initWorker();
+    port.postMessage({
+        type: 'STOP_TASK',
+        payload: { clawId: id }
+    });
+}
+
+export async function clearClaws(): Promise<void> {
+    const port = await _initWorker();
+    port.postMessage({ type: 'CLEAR_CLAWS' });
+}
+
+export async function deleteClaw(id: string): Promise<void> {
+    const port = await _initWorker();
+    port.postMessage({ type: 'DELETE_CLAW', payload: { id } });
+}
+
+export function cloneClaw(sourceId: string, name: string, model: string, provider: string): SessionData {
+    const id = crypto.randomUUID();
+    const source = _claws.get(sourceId);
+    
+    // Optimistic creation, worker will handle the rest
+    createClaw(name, model, provider, source?.emoji, id);
+    
+    return { 
+        id, title: name, clawName: name, status: 'running', 
+        messages: source?.messages || [], 
+        model, provider 
+    } as any;
+}
+
+export async function activateClawLayers(id: string): Promise<void> {
     const claw = _claws.get(id);
     if (!claw) return;
-    Object.assign(claw, updates, { updatedAt: new Date().toISOString() });
-    _claws.set(id, claw);
-    _persist();
+    if (claw.personaId) await swapPersona(claw.personaId);
+    if (claw.skillSetId) await swapSkillSet(claw.skillSetId);
 }
 
-export function deleteClaw(id: string): void {
-    _claws.delete(id);
-    stopClawTask(id); // Stop background work too
-    _persist();
-}
-
-// ── Concurrency & Layer Activation ────────────────────────────────
-
-export function canClawProceed(id: string): boolean {
-    const claw = _claws.get(id);
-    return !!claw && claw.status === 'running';
-}
-
-export function activateClawLayers(id: string): void {
-    const claw = _claws.get(id);
-    if (!claw) return;
-    if (claw.personaId) swapPersona(claw.personaId);
-    if (claw.skillSetId) swapSkillSet(claw.skillSetId);
-}
-
-// ── PANIC CONTROLS ────────────────────────────────────────────────
-
-export function panicFreezeAll(): void {
-    _panicActive = true;
-    for (const [id, claw] of _claws) {
-        if (claw.status === 'running') {
-            claw.status = 'frozen';
-            _claws.set(id, claw);
-            stopClawTask(id);
-        }
-    }
-    _persist();
-}
-
-export function isPanicActive(): boolean {
-    return _panicActive;
-}
+// ── Migration Helpers ─────────────────────────────────────────────
 
 export function killClaw(id: string): void {
+    // Legacy support, should be moved to worker too if needed
+    updateClaw(id, { status: 'killed' });
+}
+
+export async function updateClaw(id: string, updates: Partial<SessionData>): Promise<void> {
     const claw = _claws.get(id);
     if (!claw) return;
-    claw.status = 'killed';
-    _claws.set(id, claw);
-    stopClawTask(id);
-    _persist();
-}
-
-export function resumeAll(): void {
-    _panicActive = false;
-    for (const [id, claw] of _claws) {
-        if (claw.status === 'frozen') {
-            claw.status = 'running';
-            _claws.set(id, claw);
-        }
-    }
-    _persist();
-}
-
-export function resumeClaw(id: string): void {
-    const claw = _claws.get(id);
-    if (!claw || claw.status !== 'frozen') return;
-    claw.status = 'running';
-    _claws.set(id, claw);
-    const anyFrozen = Array.from(_claws.values()).some(c => c.status === 'frozen');
-    if (!anyFrozen) _panicActive = false;
-    _persist();
-}
-
-// ── Wipeout ───────────────────────────────────────────────────────
-
-export function wipeoutAll(confirmations: string[]): boolean {
-    if (confirmations.length !== 3 || !confirmations.every(c => c === WIPEOUT_PHRASE)) {
-        return false;
-    }
-
-    const personas = listPersonas();
-    for (const p of personas) {
-        try { localStorage.removeItem(`ezclaw_persona_${p.id}`); } catch {}
-    }
-
-    const skillSets = listSkillSets();
-    for (const ss of skillSets) {
-        deleteSkillSet(ss.id);
-    }
-
-    for (const [id, claw] of _claws) {
-        claw.personaId = null;
-        claw.skillSetId = null;
-        stopClawTask(id);
-        _claws.set(id, claw);
-    }
-
-    try {
-        localStorage.removeItem('ezclaw_personas');
-        localStorage.removeItem('ezclaw_active_persona');
-        localStorage.removeItem('ezclaw:skills');
-        localStorage.removeItem('ezclaw:skillsets');
-        localStorage.removeItem('ezclaw:active_skillset');
-    } catch {}
-
-    _persist();
-    return true;
-}
-
-export function getWipeoutPhrase(): string {
-    return WIPEOUT_PHRASE;
+    // For now, local update + worker will eventually persist
+    Object.assign(claw, updates);
+    _notify();
 }
 
 export function getClawCounts(): { total: number; running: number; frozen: number; killed: number } {
@@ -448,4 +256,36 @@ export function getClawCounts(): { total: number; running: number; frozen: numbe
         }
     }
     return { total: _claws.size, running, frozen, killed };
+}
+
+// ── Panic & Wipeout (Proxied) ─────────────────────────────────────
+
+export async function panicFreezeAll(): Promise<void> {
+    const port = await _initWorker();
+    port.postMessage({ type: 'PANIC_FREEZE' });
+}
+
+export async function resumeAll(): Promise<void> {
+    const port = await _initWorker();
+    port.postMessage({ type: 'RESUME_ALL' });
+}
+
+export async function wipeoutAll(confirmations: string[]): Promise<boolean> {
+    const port = await _initWorker();
+    port.postMessage({ type: 'WIPEOUT_ALL', payload: { confirmations } });
+    return true;
+}
+
+export function getWipeoutPhrase(): string {
+    return 'WIPEOUT CONFIRM';
+}
+
+export function isPanicActive(): boolean {
+    return Array.from(_claws.values()).some(c => c.status === 'frozen');
+}
+
+export async function resumeClaw(id: string): Promise<void> {
+    updateClaw(id, { status: 'running' });
+    const port = await _initWorker();
+    port.postMessage({ type: 'RESUME_CLAW', payload: { id } });
 }

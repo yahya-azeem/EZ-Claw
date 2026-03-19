@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { SessionData } from "../bridge/storage-bridge";
   import { getClawCounts, type ClawStatus } from "../bridge/claw-orchestrator";
+  import { CLAW_DEFAULTS, TIMEOUTS } from "../bridge/constants";
 
   interface Props {
     sessions: SessionData[];
@@ -49,7 +50,7 @@
     const date = new Date(dateStr);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
+    const diffMins = Math.floor(diffMs / 60000); // 60s/min
 
     if (diffMins < 1) return "Just now";
     if (diffMins < 60) return `${diffMins}m ago`;
@@ -59,27 +60,19 @@
 
   function statusIcon(status: ClawStatus | string): string {
     switch (status) {
-      case "running":
-        return "🟢";
-      case "frozen":
-        return "🔵";
-      case "killed":
-        return "⚫";
-      default:
-        return "🟢";
+      case "running": return "🟢";
+      case "frozen": return "🔵";
+      case "killed": return "⚫";
+      default: return "🟢";
     }
   }
 
   function statusLabel(status: ClawStatus | string): string {
     switch (status) {
-      case "running":
-        return "Active";
-      case "frozen":
-        return "Frozen";
-      case "killed":
-        return "Killed";
-      default:
-        return "Active";
+      case "running": return "Active";
+      case "frozen": return "Frozen";
+      case "killed": return "Killed";
+      default: return "Active";
     }
   }
 </script>
@@ -288,7 +281,8 @@
     height: 100dvh;
     display: flex;
     flex-direction: column;
-    border-right: 1px solid var(--border);
+    border-right: 1px solid var(--border-subtle);
+    background: var(--color-bg);
     flex-shrink: 0;
     overflow: hidden;
     transition: transform var(--transition-slow);
@@ -299,7 +293,7 @@
     align-items: center;
     justify-content: space-between;
     padding: var(--space-md);
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--border-subtle);
   }
 
   .sidebar-brand {
@@ -314,7 +308,8 @@
 
   .brand-text {
     font-size: var(--text-lg);
-    font-weight: 700;
+    font-weight: 800;
+    letter-spacing: -0.02em;
     background: var(--accent-gradient);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -328,29 +323,32 @@
   .new-claw-btn {
     margin: var(--space-md);
     width: calc(100% - var(--space-lg));
+    font-weight: 700;
   }
 
   /* ── New Claw Form ─────────────────────────────────────── */
   .new-claw-form {
     padding: var(--space-sm) var(--space-md);
-    border-bottom: 1px solid var(--border);
+    background: var(--color-surface-base);
+    border-bottom: 1px solid var(--border-subtle);
   }
 
   .claw-name-input {
     width: 100%;
-    padding: 8px 12px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    background: var(--color-surface-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
     color: var(--text-primary);
-    font-family: var(--font-sans);
+    font-family: var(--font-main);
     font-size: var(--text-sm);
+    transition: border-color var(--transition-fast);
     outline: none;
     margin-bottom: 8px;
   }
 
   .claw-name-input:focus {
-    border-color: var(--accent-primary);
+    border-color: var(--color-primary);
   }
 
   .clone-row {
@@ -370,14 +368,14 @@
   }
 
   .clone-label input[type="checkbox"] {
-    accent-color: var(--accent-primary);
+    accent-color: var(--color-primary);
   }
 
   .clone-select {
     width: 100%;
-    padding: 6px 8px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
+    padding: 8px 10px;
+    background: var(--color-surface-elevated);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-size: var(--text-xs);
@@ -401,27 +399,27 @@
     justify-content: space-between;
     width: 100%;
     padding: var(--space-sm) var(--space-md);
-    margin-bottom: 2px;
+    margin-bottom: 4px;
     border: none;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
-    transition: all var(--transition);
+    transition: all var(--transition-fast);
     text-align: left;
-    font-family: var(--font-sans);
+    font-family: var(--font-main);
     font-size: var(--text-sm);
   }
 
   .session-item:hover {
-    background: var(--bg-hover);
+    background: var(--color-surface-elevated);
     color: var(--text-primary);
   }
 
   .session-item.active {
-    background: rgba(59, 130, 246, 0.1);
+    background: var(--color-surface-base);
     color: var(--text-primary);
-    border-left: 2px solid var(--accent-primary);
+    box-shadow: inset 3px 0 0 var(--color-primary);
   }
 
   .session-item.frozen {

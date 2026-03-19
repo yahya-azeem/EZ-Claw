@@ -14,12 +14,113 @@
 import { initWasm, type EzClawWasm } from '../bridge/wasm-loader';
 import { executeToolCall } from '../bridge/tool-runtime';
 import { getDB, STORES } from '../bridge/db-bridge';
+import { buildProviderHeaders } from '../bridge/providers';
+import { initMemory } from '../bridge/memory-bridge';
+import { getCopilotSession, type CopilotSession } from '../bridge/copilot-bridge';
+import { NETWORK, CLAW_DEFAULTS, TIMEOUTS, EVENTS, WORKER } from '../bridge/constants';
 
 // --- Internal State ---
 let wasm: EzClawWasm | null = null;
 let workspace: any = null;
 const ports: Set<MessagePort> = new Set();
 const activeTasks: Map<string, AbortController> = new Map();
+let copilotSession: CopilotSession | null = null;
+let initPromise: Promise<void> | null = null;
+
+// --- Orchestration State (Single Source of Truth) ---
+let _claws: Map<string, any> = new Map();
+let _ws: WebSocket | null = null;
+
+async function initSync() {
+    if (_ws) return;
+    try {
+        _ws = new WebSocket(NETWORK.BRIDGE_RELAY_URL);
+        _ws.onopen = () => console.log('[Claw Worker] Connected to Bridge');
+        _ws.onmessage = (e) => {
+            try {
+                const { type, payload } = JSON.parse(e.data);
+                handleRemoteCommand(type, payload);
+            } catch {}
+        };
+        _ws.onclose = () => {
+            _ws = null;
+            setTimeout(initSync, NETWORK.RETRY_INTERVAL_MS);
+        };
+    } catch {}
+}
+
+async function handleRemoteCommand(type: string, payload: any) {
+    switch (type) {
+        case EVENTS.CREATE_CLAW:
+            await createClaw(payload);
+            break;
+        case 'REMOTE_CHAT':
+            const { id, message, providerConfig } = payload;
+            let fullId = id;
+            if (id.length === 8) {
+                const found = Array.from(_claws.values()).find(c => c.id.startsWith(id));
+                if (found) fullId = found.id;
+            }
+            handleRunTask({ clawId: fullId, messages: [{ role: 'user', content: message }], providerConfig }, null);
+            break;
+        case EVENTS.CLEAR_CLAWS:
+            _claws.clear();
+            const db = await getDB();
+            await db.clear(STORES.SESSIONS);
+            broadcast({ type: EVENTS.STATE_UPDATED, payload: { claws: [] } });
+            break;
+    }
+}
+
+async function createClaw(payload: any) {
+    const { name, model, provider, id: externalId } = payload;
+    const id = externalId || crypto.randomUUID();
+    
+    if (_claws.has(id)) return;
+
+    const claw = {
+        id,
+        title: name || CLAW_DEFAULTS.NAME,
+        clawName: name || CLAW_DEFAULTS.NAME,
+        emoji: CLAW_DEFAULTS.EMOJI,
+        status: CLAW_DEFAULTS.STATUS,
+        messages: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        model,
+        provider,
+    };
+
+    _claws.set(id, claw);
+    const db = await getDB();
+    await db.put(STORES.SESSIONS, claw);
+    broadcast({ type: EVENTS.STATE_UPDATED, payload: { claws: Array.from(_claws.values()) } });
+}
+
+async function ensureWasmInitialized() {
+    if (wasm) return;
+    if (initPromise) return initPromise;
+    
+    initPromise = (async () => {
+        console.log('[Claw Worker] Lazy-initializing WASM...');
+        wasm = await initWasm();
+        workspace = new (wasm as any).WasmWorkspace();
+        await initMemory();
+    })();
+    
+    return initPromise;
+}
+
+// --- Request/Response System with Main Thread ---
+const pendingRequests: Map<string, (data: any) => void> = new Map();
+
+async function requestFromOrchestrator(type: string, payload: any): Promise<any> {
+    const requestId = crypto.randomUUID();
+    return new Promise((resolve) => {
+        pendingRequests.set(requestId, resolve);
+        broadcast({ type, payload, requestId, isRequestFromWorker: true });
+    });
+}
 
 // --- Hybrid Worker Entry ---
 
@@ -28,7 +129,7 @@ if (typeof (self as any).onconnect !== 'undefined') {
     (self as any).onconnect = (e: MessageEvent) => {
         const port = e.ports[0];
         ports.add(port);
-        port.onmessage = (evt) => handleIncomingMessage(evt.data, port);
+        port.onmessage = (msg: MessageEvent) => handleMessage(msg, port);
         port.start();
         console.log('[Claw Worker] SharedWorker client connected.');
     };
@@ -45,42 +146,111 @@ self.addEventListener('activate', (event: any) => {
     event.waitUntil((self as any).clients.claim());
 });
 
-self.addEventListener('message', (event: any) => {
+self.addEventListener('message', (event: MessageEvent) => {
     // Service Worker messages come through the 'message' event on self
     if (event.data && event.data.type) {
-        handleIncomingMessage(event.data, event.source || event.target);
+        handleMessage(event, event.source || (self as any));
     }
 });
 
 // 3. Dedicated Worker / Fallback Support
 self.onmessage = (evt) => {
     if (evt.data && evt.data.type) {
-        handleIncomingMessage(evt.data, self as any);
+        handleMessage(evt, self as any);
     }
 };
 
-async function handleIncomingMessage(data: any, port: MessagePort | any) {
+async function handleMessage(event: MessageEvent, port: MessagePort | any) {
+    const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
     const { type, payload, requestId } = data;
+    
+    // broadcast({ type: 'LOG', payload: `[Worker Debug] Received ${type}` });
 
     try {
+        // 1. Handle Response to Worker-initiated Request
+        if (type === EVENTS.RESPONSE && requestId) {
+            const resolve = pendingRequests.get(requestId);
+            if (resolve) {
+                resolve(payload);
+                pendingRequests.delete(requestId);
+            }
+            return;
+        }
+
         switch (type) {
-            case 'PING':
-                port.postMessage({ type: 'PONG', requestId });
+            case EVENTS.PING:
+                port.postMessage({ type: EVENTS.PONG, requestId });
                 break;
 
-            case 'INIT':
-                if (!wasm) {
-                    wasm = await initWasm();
-                    workspace = new (wasm as any).WasmWorkspace();
+            case EVENTS.INIT:
+                await ensureWasmInitialized();
+                await initSync(); // Also init bridge connection from worker
+                
+                // Load existing state from DB on first init
+                if (_claws.size === 0) {
+                    const db = await getDB();
+                    const all = await db.getAll(STORES.SESSIONS);
+                    _claws = new Map(all.map(s => [s.id, s]));
                 }
-                port.postMessage({ type: 'INIT_SUCCESS', requestId });
+                
+                port.postMessage({ 
+                    type: EVENTS.INIT_SUCCESS, 
+                    payload: { claws: Array.from(_claws.values()) },
+                    requestId 
+                });
                 break;
 
-            case 'RUN_TASK':
+            case EVENTS.GET_CLAWS:
+                port.postMessage({ 
+                    type: EVENTS.STATE_UPDATED, 
+                    payload: { claws: Array.from(_claws.values()) },
+                    requestId 
+                });
+                break;
+
+            case 'RESPONSE_FROM_MAIN':
+                if (requestId && pendingRequests.has(requestId)) {
+                    pendingRequests.get(requestId)!(payload);
+                    pendingRequests.delete(requestId);
+                }
+                break;
+
+            case EVENTS.CREATE_CLAW:
+                await createClaw(payload);
+                break;
+
+            case EVENTS.CLEAR_CLAWS:
+                _claws.clear();
+                const db = await getDB();
+                await db.clear(STORES.SESSIONS);
+                broadcast({ type: EVENTS.STATE_UPDATED, payload: { claws: [] } });
+                break;
+                
+            case EVENTS.DELETE_CLAW:
+                const idToDelete = payload.id;
+                _claws.delete(idToDelete);
+                const dbDel = await getDB();
+                await dbDel.delete(STORES.SESSIONS, idToDelete);
+                broadcast({ type: EVENTS.STATE_UPDATED, payload: { claws: Array.from(_claws.values()) } });
+                break;
+
+            case EVENTS.UPDATE_CLAW:
+                const { id: idToUpdate, updates } = payload;
+                const existing = _claws.get(idToUpdate);
+                if (existing) {
+                    Object.assign(existing, updates);
+                    existing.updatedAt = new Date().toISOString();
+                    const dbUpd = await getDB();
+                    await dbUpd.put(STORES.SESSIONS, existing);
+                    broadcast({ type: EVENTS.STATE_UPDATED, payload: { claws: Array.from(_claws.values()) } });
+                }
+                break;
+                
+            case EVENTS.RUN_TASK:
                 await handleRunTask(payload, port);
                 break;
 
-            case 'STOP_TASK':
+            case EVENTS.STOP_TASK:
                 const controller = activeTasks.get(payload.clawId);
                 if (controller) {
                     controller.abort();
@@ -92,14 +262,21 @@ async function handleIncomingMessage(data: any, port: MessagePort | any) {
                 console.warn('[Claw Worker] Unknown message type:', type);
         }
     } catch (err: any) {
-        port.postMessage({ type: 'ERROR', payload: err.message, requestId });
+        console.error('[Claw Worker] Fatal Error:', err);
+        port.postMessage({ 
+            type: 'ERROR', 
+            payload: { message: err.message, stack: err.stack }, 
+            requestId 
+        });
     }
 }
 
 async function handleRunTask(payload: any, port: MessagePort | any) {
     const { clawId, messages, providerConfig, identityPrompt, memories } = payload;
+    broadcast({ type: 'LOG', payload: `[Worker] handleRunTask for ${clawId}` });
     
-    if (!wasm) throw new Error('WASM not initialized in worker');
+    await ensureWasmInitialized();
+    if (!wasm) throw new Error('WASM failed to initialize in worker');
 
     // Cancel existing task for this claw if running
     activeTasks.get(clawId)?.abort();
@@ -109,11 +286,19 @@ async function handleRunTask(payload: any, port: MessagePort | any) {
     const { signal } = abortController;
 
     try {
+        const session = _claws.get(clawId);
+        
+        // Use session config if available, fallback to provided payload
+        const runProvider = session?.provider || providerConfig.provider;
+        const runModel = session?.model || providerConfig.model;
+        const runTemp = session?.temperature ?? providerConfig.temperature ?? 0.7;
+        const runApiUrl = session?.apiUrl || providerConfig.apiUrl;
+
         // Create agent instance in worker
         const agent = new (wasm as any).WasmAgent(JSON.stringify({
-            default_provider: providerConfig.provider,
-            default_model: providerConfig.model,
-            default_temperature: providerConfig.temperature,
+            default_provider: runProvider,
+            default_model: runModel,
+            default_temperature: runTemp,
         }));
 
         const builtMessagesJson = agent.build_messages(
@@ -124,7 +309,7 @@ async function handleRunTask(payload: any, port: MessagePort | any) {
         );
 
         let loopMessages = JSON.parse(builtMessagesJson);
-        const maxIterations = 10;
+        const maxIterations = CLAW_DEFAULTS.MAX_ITERATIONS;
         
         // --- Agentic Loop ---
         for (let i = 0; i < maxIterations; i++) {
@@ -136,45 +321,72 @@ async function handleRunTask(payload: any, port: MessagePort | any) {
 
             const requestBody = (wasm as any).build_provider_request_with_tools(
                 JSON.stringify(loopMessages),
-                providerConfig.model,
-                providerConfig.temperature,
+                runModel,
+                runTemp,
                 false,
                 toolsJson
             );
 
-            const baseUrl = providerConfig.apiUrl || wasm.provider_base_url(providerConfig.provider);
+            const baseUrl = runApiUrl || wasm.provider_base_url(runProvider);
             const endpoint = `${baseUrl}/chat/completions`;
+            broadcast({ type: 'LOG', payload: `[Worker] Fetching ${endpoint} (Provider: ${runProvider})` });
 
-            // Simple header builder (copied from providers.ts logic to be worker-safe)
-            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-            if (providerConfig.apiKey) {
-                if (providerConfig.provider === 'openai' || providerConfig.provider === 'deepseek') {
-                    headers['Authorization'] = `Bearer ${providerConfig.apiKey}`;
-                } else if (providerConfig.provider === 'anthropic') {
-                    headers['x-api-key'] = providerConfig.apiKey;
-                    headers['anthropic-version'] = '2023-06-01';
+            // Use the centralized header builder from providers.ts
+            let apiKey = providerConfig.apiKey;
+            if (!apiKey && providerConfig.provider === 'github-copilot') {
+                // 1. Check for basic User Access Token from secrets
+                const db = await getDB();
+                const secret = await db.get(STORES.SECRETS, 'GITHUB_TOKEN');
+                
+                if (secret) {
+                    // 2. Check if we need to refresh/get the Copilot Session Token
+                    if (!copilotSession || Date.now() >= copilotSession.expires_at - TIMEOUTS.COPILOT_REFRESH_BUFFER_MS) {
+                        broadcast({ type: 'TASK_STATUS', payload: { clawId, status: 'Refreshing Copilot Session...' } });
+                        copilotSession = await getCopilotSession(secret.value);
+                    }
+                    apiKey = copilotSession.token;
                 }
             }
 
-            const response = await fetch(endpoint, {
-                method: 'POST',
-                headers,
-                body: requestBody,
-                signal
-            });
+            const headers = buildProviderHeaders(runProvider, apiKey || '');
 
-            if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(`API error ${response.status}: ${errText}`);
+            let assistantMsg: any;
+
+            if (runProvider === 'github-copilot-sdk') {
+                // Proxy to bridge relay via Main Thread (Orchestrator)
+                broadcast({ type: 'TASK_STATUS', payload: { clawId, status: '📡 SDK Request...' } });
+                
+                const sdkResponse: any = await requestFromOrchestrator('COPILOT_SDK_CHAT', { messages: loopMessages });
+                assistantMsg = { role: 'assistant', content: sdkResponse.content };
+                
+                // Note: SDK currently doesn't provide tool_calls in this simplified proxy
+            } else {
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers,
+                    body: requestBody,
+                    signal
+                });
+
+                broadcast({ type: 'LOG', payload: `[Worker] Response Status: ${response.status}` });
+
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(`API error ${response.status}: ${errText}`);
+                }
+
+                const data = await response.json();
+                assistantMsg = data.choices?.[0]?.message;
             }
 
-            const data = await response.json();
-            const assistantMsg = data.choices?.[0]?.message;
             if (!assistantMsg) throw new Error('No message from provider');
 
-            // Notify UI of arrival
+            // 1. Notify UI of arrival (if any tabs are open)
             broadcast({ type: 'MESSAGE_ADD', payload: { clawId, message: assistantMsg } });
             loopMessages.push(assistantMsg);
+
+            // 2. Persist to DB for background recovery
+            await persistToDB(clawId, assistantMsg);
 
             if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
                 for (const tc of assistantMsg.tool_calls) {
@@ -201,6 +413,9 @@ async function handleRunTask(payload: any, port: MessagePort | any) {
                     const toolMsg = { role: 'tool', tool_call_id: toolId, name: toolName, content: result };
                     broadcast({ type: 'MESSAGE_ADD', payload: { clawId, message: toolMsg } });
                     loopMessages.push(toolMsg);
+                    
+                    // Persist tool result too
+                    await persistToDB(clawId, toolMsg);
                 }
                 continue;
             }
@@ -236,5 +451,28 @@ async function broadcast(msg: any) {
     // 3. Fallback for Dedicated Worker
     if (ports.size === 0 && !(self as any).clients) {
         (self as any).postMessage(msg);
+    }
+}
+
+async function persistToDB(clawId: string, message: any) {
+    try {
+        const claw = _claws.get(clawId);
+        if (claw) {
+            claw.messages = [...(claw.messages || []), message];
+            claw.updatedAt = new Date().toISOString();
+            
+            const db = await getDB();
+            await db.put(STORES.SESSIONS, claw);
+            
+            // Broadcast update to all tabs
+            broadcast({ type: 'STATE_UPDATED', payload: { claws: Array.from(_claws.values()) } });
+            
+            // Forward to bridge relay for CLI feedback
+            if (_ws && _ws.readyState === WebSocket.OPEN) {
+                _ws.send(JSON.stringify({ type: 'MESSAGE_ADD', payload: { clawId, message } }));
+            }
+        }
+    } catch (err) {
+        console.error('[Claw Worker] Persistence failed:', err);
     }
 }

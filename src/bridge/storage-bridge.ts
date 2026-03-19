@@ -8,6 +8,7 @@
 
 import { getDB, STORES } from './db-bridge';
 import { getWasm } from './wasm-loader';
+import { STORAGE } from './constants';
 
 export interface SessionData {
     id: string;
@@ -27,6 +28,8 @@ export interface SessionData {
     updatedAt: string;
     model: string;
     provider: string;
+    temperature?: number;
+    apiUrl?: string;
 }
 
 interface SecretsEntry {
@@ -42,23 +45,26 @@ export async function initStorage(): Promise<void> {
     await getDB();
 }
 
-async function getDb() {
-    return await getDB();
-}
-
 // ── Sessions ─────────────────────────────────────────────────────
 
 export async function saveSession(session: SessionData): Promise<void> {
+    if (!session.id) {
+        console.warn('[Storage Bridge] Attempted to save session without ID. Generating one.');
+        session.id = crypto.randomUUID();
+    }
     session.updatedAt = new Date().toISOString();
-    await (await getDb()).put(STORES.SESSIONS, session);
+    const db = await getDB();
+    await db.put(STORES.SESSIONS, session);
 }
 
 export async function getSession(id: string): Promise<SessionData | undefined> {
-    return (await getDb()).get(STORES.SESSIONS, id);
+    const db = await getDB();
+    return db.get(STORES.SESSIONS, id);
 }
 
 export async function getAllSessions(): Promise<SessionData[]> {
-    const sessions = await (await getDb()).getAll(STORES.SESSIONS);
+    const db = await getDB();
+    const sessions = await db.getAll(STORES.SESSIONS);
     // Sort by updatedAt descending
     return sessions.sort(
         (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
@@ -66,22 +72,31 @@ export async function getAllSessions(): Promise<SessionData[]> {
 }
 
 export async function deleteSession(id: string): Promise<void> {
-    await (await getDb()).delete(STORES.SESSIONS, id);
+    const db = await getDB();
+    await db.delete(STORES.SESSIONS, id);
+}
+
+export async function clearAllSessions(): Promise<void> {
+    const db = await getDB();
+    await db.clear(STORES.SESSIONS);
 }
 
 // ── Config ───────────────────────────────────────────────────────
 
 export async function saveConfig(key: string, value: string): Promise<void> {
-    await (await getDb()).put(STORES.CONFIG, { key, value });
+    const db = await getDB();
+    await db.put(STORES.CONFIG, { key, value });
 }
 
 export async function getConfig(key: string): Promise<string | undefined> {
-    const entry = await (await getDb()).get(STORES.CONFIG, key);
+    const db = await getDB();
+    const entry = await db.get(STORES.CONFIG, key);
     return entry?.value;
 }
 
 export async function getAllConfig(): Promise<Record<string, string>> {
-    const entries = await (await getDb()).getAll(STORES.CONFIG);
+    const db = await getDB();
+    const entries = await db.getAll(STORES.CONFIG);
     const config: Record<string, string> = {};
     for (const entry of entries) {
         config[entry.key] = entry.value;
@@ -110,17 +125,16 @@ export async function storeSecret(
         stored = { key, value, encrypted: false };
     }
 
-    await (await getDb()).put(STORES.SECRETS, stored);
+    const db = await getDB();
+    await db.put(STORES.SECRETS, stored);
 }
 
-/**
- * Retrieve an API key, decrypting if necessary.
- */
 export async function getSecret(
     key: string,
     passphrase?: string
 ): Promise<string | undefined> {
-    const entry: SecretsEntry | undefined = await (await getDb()).get(STORES.SECRETS, key);
+    const db = await getDB();
+    const entry: SecretsEntry | undefined = await db.get(STORES.SECRETS, key);
     if (!entry) return undefined;
 
     if (entry.encrypted) {
@@ -135,7 +149,8 @@ export async function getSecret(
 }
 
 export async function deleteSecret(key: string): Promise<void> {
-    await (await getDb()).delete(STORES.SECRETS, key);
+    const db = await getDB();
+    await db.delete(STORES.SECRETS, key);
 }
 
 // ── Export/Import (session persistence) ──────────────────────────

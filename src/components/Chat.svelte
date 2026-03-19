@@ -15,6 +15,7 @@
   import { recallMemories } from "../bridge/memory-bridge";
   import { NO_KEY_PROVIDERS } from "../bridge/providers";
   import type { SessionData } from "../bridge/storage-bridge";
+  import { CLAW_DEFAULTS, EVENTS } from "../bridge/constants";
 
   interface Props {
     sessionId: string | null;
@@ -47,6 +48,8 @@
   let isStreaming = $state(false);
   let streamingContent = $state("");
   let toolActivity = $state("");
+  let lastStatus = $state<string | null>(null);
+  let lastError = $state<string | null>(null);
   let chatContainer: HTMLDivElement | undefined = $state();
   let inputEl: HTMLTextAreaElement | undefined = $state();
 
@@ -61,7 +64,8 @@
         const claw = getClaw(sessionId!);
         if (claw) {
           messages = claw.messages;
-          // We could also bridge status/streaming flags from the worker here
+          lastStatus = (claw as any).lastStatus;
+          lastError = (claw as any).lastError;
         }
       });
       return unsub;
@@ -78,10 +82,12 @@
   }
 
   async function sendMessage() {
+    console.log("[Chat UI] sendMessage triggered", { inputText, sessionId, provider, model, hasKey: !!apiKey });
     const text = inputText.trim();
     if (!text || isStreaming) return;
 
     if (!apiKey && !NO_KEY_PROVIDERS.includes(provider)) {
+      console.warn("[Chat UI] No API key, aborting.");
       messages = [...messages, {
         role: "assistant",
         content: "⚠️ **No API key configured.** Please open Settings and enter your API key to start chatting.",
@@ -92,15 +98,14 @@
     // Local echo for immediate feedback
     messages = [...messages, { role: "user", content: text }];
     inputText = "";
-    isStreaming = true; // Temporary UI flag, worker will eventually own this
+    isStreaming = true;
     toolActivity = "Starting...";
 
     await scrollToBottom();
 
     try {
-      // 1. Pre-process local state
-      let identityPrompt = buildIdentityPrompt();
-      if (isFirstRun()) identityPrompt += "\n\n" + buildBootstrapPrompt();
+      let identityPrompt = await buildIdentityPrompt();
+      if (await isFirstRun()) identityPrompt += "\n\n" + (await buildBootstrapPrompt());
 
       let memoriesArr: string[] = [];
       try {
@@ -108,15 +113,15 @@
         memoriesArr = recalled.map(m => `[${m.category}] ${m.key}: ${m.content}`);
       } catch {}
 
+      const session = getClaw(sessionId || "");
       const providerConfig = {
-        provider,
-        apiKey,
-        model,
-        temperature,
-        apiUrl: apiUrl || undefined,
+        provider: session?.provider || provider,
+        model: session?.model || model,
+        apiKey: apiKey,
+        temperature: session?.temperature ?? temperature,
+        apiUrl: session?.apiUrl || apiUrl || undefined,
       };
 
-      // 2. Dispatch to Background Worker
       runClawTask(sessionId || "default", {
         messages: messages.filter(m => m.role && m.content),
         providerConfig,
@@ -130,7 +135,6 @@
         content: `❌ **Error:** ${err instanceof Error ? err.message : String(err)}`,
       }];
     } finally {
-      // Note: isStreaming and toolActivity will eventually be driven by worker events
       isStreaming = false;
       toolActivity = "";
     }
@@ -208,10 +212,10 @@
       />
     {/if}
 
-    {#if toolActivity}
+    {#if toolActivity || lastStatus}
       <div class="tool-activity">
         <span class="tool-spinner"></span>
-        <span>{toolActivity}</span>
+        <span>{lastStatus || toolActivity}</span>
       </div>
     {/if}
   </div>
@@ -252,7 +256,7 @@
       </button>
     </div>
     <div class="input-footer">
-      <span>Shift+Enter for new line • {provider}/{model}</span>
+      <span>Shift+Enter for new line • {getClaw(sessionId || "")?.provider || provider}/{getClaw(sessionId || "")?.model || model}</span>
     </div>
   </div>
 </div>
@@ -286,11 +290,13 @@
   .empty-icon {
     font-size: 72px;
     margin-bottom: var(--space-lg);
-    filter: drop-shadow(0 0 20px rgba(59, 130, 246, 0.3));
+    filter: drop-shadow(0 0 20px var(--color-primary-glow));
   }
 
   .empty-state h2 {
     font-size: var(--text-2xl);
+    font-weight: 800;
+    letter-spacing: -0.02em;
     background: var(--accent-gradient);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -313,26 +319,28 @@
 
   .quick-prompt {
     padding: var(--space-sm) var(--space-md);
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
+    background: var(--color-surface-base);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-full);
     color: var(--text-secondary);
     cursor: pointer;
-    transition: all var(--transition);
-    font-family: var(--font-sans);
+    transition: all var(--transition-fast);
+    font-family: var(--font-main);
     font-size: var(--text-sm);
   }
 
   .quick-prompt:hover {
-    background: var(--bg-hover);
-    border-color: var(--border-active);
+    background: var(--color-surface-elevated);
+    border-color: var(--color-primary);
     color: var(--text-primary);
-    transform: translateY(-1px);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-deep);
   }
 
   .input-area {
     padding: var(--space-md) var(--space-lg);
-    border-top: 1px solid var(--border);
+    background: var(--color-bg);
+    border-top: 1px solid var(--border-subtle);
     flex-shrink: 0;
   }
 
@@ -347,26 +355,27 @@
   .chat-input {
     flex: 1;
     padding: var(--space-sm) var(--space-md);
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
+    background: var(--color-surface-base);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
     color: var(--text-primary);
-    font-family: var(--font-sans);
+    font-family: var(--font-main);
     font-size: var(--text-base);
     line-height: 1.5;
     resize: none;
     outline: none;
     max-height: 150px;
-    transition: border-color var(--transition);
+    transition: all var(--transition-fast);
   }
 
   .chat-input:focus {
-    border-color: var(--accent-primary);
-    box-shadow: 0 0 0 3px var(--accent-glow);
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px var(--color-primary-glow);
+    background: var(--color-surface-elevated);
   }
 
   .chat-input::placeholder {
-    color: var(--text-tertiary);
+    color: var(--text-dim);
   }
 
   .chat-input:disabled {
@@ -442,11 +451,16 @@
     display: flex;
     align-items: center;
     gap: var(--space-sm);
-    padding: var(--space-sm) var(--space-lg);
-    max-width: 900px;
-    margin: 0 auto;
-    color: var(--text-accent);
-    font-size: var(--text-sm);
+    padding: var(--space-xs) var(--space-md);
+    max-width: fit-content;
+    margin: var(--space-sm) auto;
+    color: var(--accent-primary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-active);
+    border-radius: var(--radius-full);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    box-shadow: var(--shadow-sm);
     animation: fadeIn 0.3s ease-out;
   }
 

@@ -208,7 +208,7 @@ async function dispatchTool(
         }
 
         case 'update_identity': {
-            const identity = loadIdentity();
+            const identity = await loadIdentity();
             if (args.name) {
                 identity.name = args.name;
                 identity.facts['name'] = args.name;
@@ -222,7 +222,7 @@ async function dispatchTool(
             if (args.fact_key && args.fact_value) {
                 identity.facts[args.fact_key] = args.fact_value;
             }
-            saveIdentity(identity);
+            await saveIdentity(identity);
             // Also store in memory for cross-chat recall
             try {
                 if (args.name) storeMemory('identity_name', `My name is ${args.name}`, 'identity');

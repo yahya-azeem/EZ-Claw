@@ -50,12 +50,19 @@
                 await manager.bootContainer();
                 containerReady = true;
             } catch (err) {
-                // Error is handled by TerminalView events
+                console.warn("[Terminal] Container boot failed", err);
             } finally {
                 containerBooting = false;
             }
-        } else if (tier === "container2wasm") {
-            containerReady = true;
+        } else if (tier === "native") {
+            // Check connection
+            try {
+                // The manager might have an internal check
+                const isConn = (manager as any).native?.isConnected;
+                if (!isConn) {
+                    console.log("[Terminal] Native companion not detected. Tier remains but will show error on use.");
+                }
+            } catch {}
         }
     }
 </script>
@@ -182,9 +189,9 @@
     }
 
     .terminal-header {
-        height: 40px;
-        background: #161b22;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        height: 48px;
+        background: var(--color-surface-base);
+        border-bottom: 1px solid var(--border-subtle);
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -198,11 +205,11 @@
     }
 
     .terminal-title {
-        color: #8b949e;
+        color: var(--text-dim);
         font-size: var(--text-xs);
-        font-weight: 600;
+        font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.1em;
     }
 
     .tier-selector {
@@ -210,57 +217,65 @@
     }
 
     .tier-btn {
-        background: #21262d;
-        border: 1px solid rgba(240, 246, 252, 0.1);
+        background: var(--color-surface-elevated);
+        border: 1px solid var(--border-strong);
         border-radius: var(--radius-md);
-        color: #c9d1d9;
-        padding: 4px 10px;
+        color: var(--text-primary);
+        padding: 6px 12px;
         font-size: var(--text-xs);
         cursor: pointer;
         display: flex;
         align-items: center;
-        gap: 6px;
-        font-weight: 600;
-        letter-spacing: 0.05em;
+        gap: 8px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        transition: all var(--transition-fast);
     }
 
     .tier-btn:hover {
-        background: #30363d;
-        border-color: #8b949e;
+        background: var(--color-surface-base);
+        border-color: var(--color-primary);
+        box-shadow: 0 0 10px var(--color-primary-glow);
     }
 
     .tier-menu {
         position: absolute;
         top: 100%;
         left: 0;
-        margin-top: 4px;
-        background: #1c2128;
-        border: 1px solid rgba(255, 255, 255, 0.15);
+        margin-top: 8px;
+        background: var(--color-bg);
+        border: 1px solid var(--border-strong);
         border-radius: var(--radius-md);
+        box-shadow: var(--shadow-deep), 0 0 30px var(--color-primary-glow);
         overflow: hidden;
         z-index: 10;
-        min-width: 200px;
+        min-width: 220px;
+        padding: 4px;
     }
 
     .tier-option {
         display: flex;
         flex-direction: column;
-        padding: var(--space-sm) var(--space-md);
+        padding: 10px 14px;
         background: none;
         border: none;
-        color: #e6edf3;
+        color: var(--text-secondary);
+        border-radius: var(--radius-sm);
         cursor: pointer;
         font-size: var(--text-sm);
         text-align: left;
         width: 100%;
-        transition: background 0.2s;
+        transition: all var(--transition-fast);
     }
 
     .tier-option:hover {
-        background: rgba(99, 102, 241, 0.15);
+        background: var(--color-surface-elevated);
+        color: var(--text-primary);
     }
     .tier-option.active {
-        background: rgba(99, 102, 241, 0.25);
+        background: var(--color-surface-base);
+        color: var(--color-primary);
+        font-weight: 600;
     }
 
     .tier-desc {
@@ -293,23 +308,24 @@
 
     .terminal-body {
         flex: 1;
-        background: #0d1117;
-        padding: 8px;
+        background: #000000;
+        padding: 12px;
         min-height: 0;
     }
 
     .status-dot {
-        width: 8px;
-        height: 8px;
+        width: 10px;
+        height: 10px;
         border-radius: 50%;
-        background: #484f58;
+        background: var(--color-surface-elevated);
     }
     .status-dot.ready {
-        background: #3fb950;
-        box-shadow: 0 0 8px rgba(63, 185, 80, 0.5);
+        background: var(--color-success);
+        box-shadow: 0 0 10px var(--color-success);
     }
     .status-dot.booting {
-        background: #d29922;
+        background: var(--color-secondary);
+        box-shadow: 0 0 10px var(--color-secondary);
         animation: pulse 1.5s infinite;
     }
 

@@ -68,22 +68,22 @@ let _cachedPrompt: string | null = null;
 /**
  * Get the current identity (read-through to identity-bridge).
  */
-export function getPersona(): AgentIdentity {
-    return loadIdentity();
+export async function getPersona(): Promise<AgentIdentity> {
+    return await loadIdentity();
 }
 
 /**
  * Get the current user profile.
  */
-export function getUser(): UserProfile {
-    return loadUser();
+export async function getUser(): Promise<UserProfile> {
+    return await loadUser();
 }
 
 /**
  * Update a single identity field and emit update event.
  */
-export function updatePersonaField(field: keyof AgentIdentity, value: any): AgentIdentity {
-    const updated = updateIdentityField(field, value);
+export async function updatePersonaField(field: keyof AgentIdentity, value: any): Promise<AgentIdentity> {
+    const updated = await updateIdentityField(field, value);
     _cachedPrompt = null; // Invalidate cached prompt
     emit('persona:updated', { field, value });
     return updated;
@@ -92,8 +92,8 @@ export function updatePersonaField(field: keyof AgentIdentity, value: any): Agen
 /**
  * Set a fact on the persona.
  */
-export function setPersonaFact(key: string, value: string): AgentIdentity {
-    const updated = setFact(key, value);
+export async function setPersonaFact(key: string, value: string): Promise<AgentIdentity> {
+    const updated = await setFact(key, value);
     _cachedPrompt = null;
     emit('persona:updated', { fact: key, value });
     return updated;
@@ -102,8 +102,8 @@ export function setPersonaFact(key: string, value: string): AgentIdentity {
 /**
  * Get a fact from the persona.
  */
-export function getPersonaFact(key: string): string | undefined {
-    return getFact(key);
+export async function getPersonaFact(key: string): Promise<string | undefined> {
+    return await getFact(key);
 }
 
 /**
@@ -112,12 +112,12 @@ export function getPersonaFact(key: string): string | undefined {
  *
  * Returns true if the swap succeeded.
  */
-export function swapPersona(personaId: string): boolean {
-    const success = switchPersona(personaId);
+export async function swapPersona(personaId: string): Promise<boolean> {
+    const success = await switchPersona(personaId);
     if (success) {
         _cachedPrompt = null;
         emit('persona:swapped', { personaId });
-        emit('persona:prompt-rebuilt', { prompt: getSystemPrompt() });
+        emit('persona:prompt-rebuilt', { prompt: await getSystemPrompt() });
     }
     return success;
 }
@@ -125,8 +125,8 @@ export function swapPersona(personaId: string): boolean {
 /**
  * Create a new persona.
  */
-export function newPersona(label: string, fromCurrent: boolean = false): PersonaEntry {
-    const entry = createPersona(label, fromCurrent);
+export async function newPersona(label: string, fromCurrent: boolean = false): Promise<PersonaEntry> {
+    const entry = await createPersona(label, fromCurrent);
     emit('persona:created', { id: entry.id, label });
     return entry;
 }
@@ -134,8 +134,8 @@ export function newPersona(label: string, fromCurrent: boolean = false): Persona
 /**
  * Delete a persona by ID.
  */
-export function removePersona(personaId: string): boolean {
-    const success = deletePersona(personaId);
+export async function removePersona(personaId: string): Promise<boolean> {
+    const success = await deletePersona(personaId);
     if (success) emit('persona:deleted', { personaId });
     return success;
 }
@@ -143,9 +143,9 @@ export function removePersona(personaId: string): boolean {
 /**
  * Get the system prompt (cached). Rebuilds on persona swap.
  */
-export function getSystemPrompt(): string {
+export async function getSystemPrompt(): Promise<string> {
     if (!_cachedPrompt) {
-        _cachedPrompt = isFirstRun() ? buildBootstrapPrompt() : buildIdentityPrompt();
+        _cachedPrompt = await isFirstRun() ? buildBootstrapPrompt() : await buildIdentityPrompt();
     }
     return _cachedPrompt;
 }
@@ -153,9 +153,9 @@ export function getSystemPrompt(): string {
 /**
  * Force rebuild the system prompt (e.g., after skill swap).
  */
-export function rebuildPrompt(): string {
+export async function rebuildPrompt(): Promise<string> {
     _cachedPrompt = null;
-    const prompt = getSystemPrompt();
+    const prompt = await getSystemPrompt();
     emit('persona:prompt-rebuilt', { prompt });
     return prompt;
 }
@@ -163,15 +163,15 @@ export function rebuildPrompt(): string {
 /**
  * Check if this is the first run (bootstrap needed).
  */
-export function needsBootstrap(): boolean {
-    return isFirstRun();
+export async function needsBootstrap(): Promise<boolean> {
+    return await isFirstRun();
 }
 
 /**
  * Mark the persona as bootstrapped.
  */
-export function completeBootstrap(): void {
-    markBootstrapped();
+export async function completeBootstrap(): Promise<void> {
+    await markBootstrapped();
     _cachedPrompt = null;
 }
 

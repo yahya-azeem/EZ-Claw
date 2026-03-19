@@ -100,18 +100,21 @@
   }
 
   .message.assistant {
-    background: rgba(30, 41, 59, 0.3);
+    background: var(--color-surface-base);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
     margin-top: var(--space-xs);
     margin-bottom: var(--space-xs);
   }
 
   .message.tool {
-    background: rgba(15, 23, 42, 0.2);
-    border-left: 3px solid var(--accent-primary);
+    background: var(--color-surface-elevated);
+    border-left: 4px solid var(--color-primary);
     padding: var(--space-md) var(--space-xl);
     font-size: 0.95em;
-    opacity: 0.85;
+    opacity: 0.9;
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
   }
 
   .message-avatar {
@@ -132,17 +135,18 @@
   .avatar-user {
     background: var(--accent-gradient);
     color: white;
+    box-shadow: 0 0 10px var(--color-primary-glow);
   }
 
   .avatar-assistant {
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
+    background: var(--color-surface-elevated);
+    border: 1px solid var(--border-strong);
     font-size: 18px;
   }
 
   .avatar-tool {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
+    background: var(--color-surface-base);
+    border: 1px solid var(--border-subtle);
     font-size: 14px;
   }
 
@@ -168,15 +172,15 @@
   }
 
   .message-content.terminal {
-    background: #0f172a;
-    color: #38bdf8;
+    background: #000000;
+    color: var(--color-secondary);
     padding: var(--space-md);
     border-radius: var(--radius-md);
     font-family: var(--font-mono);
     font-size: 0.9em;
     white-space: pre-wrap;
-    border: 1px solid #1e293b;
-    box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+    border: 1px solid var(--border-strong);
+    box-shadow: inset 0 2px 10px rgba(0,0,0,0.8), 0 0 15px var(--color-secondary-glow);
     margin-top: var(--space-sm);
   }
 
@@ -185,11 +189,12 @@
   }
 
   .tool-call-item {
-    background: rgba(59, 130, 246, 0.1);
-    border: 1px solid rgba(59, 130, 246, 0.2);
+    background: var(--color-surface-elevated);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);
     padding: var(--space-sm);
     margin-bottom: var(--space-xs);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
   }
 
   .tool-call-header {

@@ -16,12 +16,16 @@ wss.on('connection', (ws) => {
     clients.add(ws);
     console.log(`[Bridge Relay] Client connected. Total: ${clients.size}`);
 
-    ws.on('message', (data) => {
+    ws.on('message', async (data) => {
+        const messageStr = data.toString();
+        try {
+            JSON.parse(messageStr);
+        } catch {}
+
         // Broadcast to everyone else
-        const message = data.toString();
         clients.forEach((client) => {
             if (client !== ws && client.readyState === WebSocket.OPEN) {
-                client.send(message);
+                client.send(messageStr);
             }
         });
     });

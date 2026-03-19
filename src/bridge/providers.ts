@@ -114,6 +114,13 @@ export const PROVIDERS: ProviderDef[] = [
         defaultApiUrl: 'https://models.inference.ai.azure.com',
     },
     {
+        id: 'github-copilot-sdk',
+        name: 'GitHub Copilot (SDK)',
+        defaultModel: 'claude-3-haiku',
+        models: ['gpt-4o', 'gpt-4o-mini', 'claude-3-5-sonnet', 'claude-3-haiku', 'gemini-1.5-pro'],
+        free: true, // Handled by server auth
+    },
+    {
         id: 'zerogravity',
         name: 'ZeroGravity (Antigravity)',
         defaultModel: 'sonnet-4.6',
@@ -178,8 +185,9 @@ export function buildProviderHeaders(provider: string, apiKey: string): Record<s
         headers['Authorization'] = `Bearer ${apiKey}`;
     }
 
-    if (provider === 'openrouter' && typeof window !== 'undefined') {
-        headers['HTTP-Referer'] = window.location.origin;
+    if (provider === 'openrouter') {
+        const origin = typeof self !== 'undefined' ? self.location.origin : '';
+        headers['HTTP-Referer'] = origin;
         headers['X-Title'] = 'EZ-Claw';
     }
 

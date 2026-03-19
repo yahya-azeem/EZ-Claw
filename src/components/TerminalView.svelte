@@ -31,23 +31,23 @@
         term = new Terminal({
             cursorBlink: true,
             theme: {
-                background: "#0d1117",
-                foreground: "#e6edf3",
-                cursor: "#58a6ff",
-                selectionBackground: "rgba(88, 166, 255, 0.3)",
-                black: "#484f58",
-                red: "#ff7b72",
-                green: "#3fb950",
-                yellow: "#d29922",
-                blue: "#58a6ff",
-                magenta: "#bc8cff",
-                cyan: "#39c5bb",
-                white: "#b1bac4",
+                background: "#000000",
+                foreground: "#E0E0E0",
+                cursor: "#7C3AED",
+                selectionBackground: "rgba(124, 58, 237, 0.3)",
+                black: "#1A1A1A",
+                red: "#FF4B4B",
+                green: "#00E676",
+                yellow: "#FFD600",
+                blue: "#2979FF",
+                magenta: "#D500F9",
+                cyan: "#00E5FF",
+                white: "#FFFFFF",
             },
             fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-            fontSize: 13,
+            fontSize: 14,
             lineHeight: 1.4,
-            scrollback: 1000,
+            scrollback: 5000,
             convertEol: true
         });
 
@@ -145,5 +145,19 @@
     :global(.xterm) {
         height: 100%;
         padding: 4px;
+    }
+    .terminal-panel {
+        width: 90%;
+        height: 80%;
+        max-width: 1000px;
+        background: var(--color-bg);
+        border: 1px solid var(--border-strong);
+        border-radius: var(--radius-lg);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        animation: slideUp 0.2s ease-out;
+        outline: none;
+        box-shadow: var(--shadow-deep), 0 0 40px var(--color-primary-glow);
     }
 </style>

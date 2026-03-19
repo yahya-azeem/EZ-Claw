@@ -16,6 +16,7 @@
  */
 
 // ── Types ────────────────────────────────────────────────────────
+import { getDB, STORES } from '../bridge/db-bridge';
 
 export interface SkillDef {
     /** Unique skill ID */
@@ -81,21 +82,23 @@ const SKILLSETS_KEY = 'ezclaw:skillsets';
 
 let activeSkills: SkillDef[] = [];
 
-function loadActiveSkills(): SkillDef[] {
+async function loadActiveSkills(): Promise<SkillDef[]> {
     try {
-        const raw = localStorage.getItem(SKILLS_KEY);
+        const db = await getDB();
+        const raw = await db.get(STORES.CONFIG, SKILLS_KEY);
         if (raw) {
-            activeSkills = JSON.parse(raw);
+            activeSkills = raw;
             return activeSkills;
         }
     } catch { /* ignore */ }
     activeSkills = getDefaultSkills();
-    saveActiveSkills();
+    await saveActiveSkills();
     return activeSkills;
 }
 
-function saveActiveSkills(): void {
-    localStorage.setItem(SKILLS_KEY, JSON.stringify(activeSkills));
+async function saveActiveSkills(): Promise<void> {
+    const db = await getDB();
+    await db.put(STORES.CONFIG, activeSkills, SKILLS_KEY);
 }
 
 function getDefaultSkills(): SkillDef[] {
@@ -135,8 +138,8 @@ function getDefaultSkills(): SkillDef[] {
 /**
  * Initialize the skills layer — loads active skills from localStorage.
  */
-export function initSkills(): SkillDef[] {
-    return loadActiveSkills();
+export async function initSkills(): Promise<SkillDef[]> {
+    return await loadActiveSkills();
 }
 
 /**
@@ -149,14 +152,14 @@ export function getSkills(): SkillDef[] {
 /**
  * Add a new skill to the active set.
  */
-export function addSkill(skill: Omit<SkillDef, 'id' | 'updatedAt'>): SkillDef {
+export async function addSkill(skill: Omit<SkillDef, 'id' | 'updatedAt'>): Promise<SkillDef> {
     const newSkill: SkillDef = {
         ...skill,
         id: crypto.randomUUID(),
         updatedAt: new Date().toISOString(),
     };
     activeSkills.push(newSkill);
-    saveActiveSkills();
+    await saveActiveSkills();
     emit('skills:added', { skill: newSkill });
     emit('skills:tools-rebuilt');
     return newSkill;
@@ -165,11 +168,11 @@ export function addSkill(skill: Omit<SkillDef, 'id' | 'updatedAt'>): SkillDef {
 /**
  * Remove a skill by ID.
  */
-export function removeSkill(skillId: string): boolean {
+export async function removeSkill(skillId: string): Promise<boolean> {
     const idx = activeSkills.findIndex((s) => s.id === skillId);
     if (idx === -1) return false;
     activeSkills.splice(idx, 1);
-    saveActiveSkills();
+    await saveActiveSkills();
     emit('skills:removed', { skillId });
     emit('skills:tools-rebuilt');
     return true;
@@ -178,11 +181,11 @@ export function removeSkill(skillId: string): boolean {
 /**
  * Update an existing skill.
  */
-export function updateSkill(skillId: string, updates: Partial<SkillDef>): SkillDef | null {
+export async function updateSkill(skillId: string, updates: Partial<SkillDef>): Promise<SkillDef | null> {
     const skill = activeSkills.find((s) => s.id === skillId);
     if (!skill) return null;
     Object.assign(skill, updates, { updatedAt: new Date().toISOString() });
-    saveActiveSkills();
+    await saveActiveSkills();
     emit('skills:updated', { skill });
     return skill;
 }
@@ -218,8 +221,8 @@ export function getSkillTools(): ToolDef[] {
 /**
  * Save the current skills as a named skill set.
  */
-export function saveSkillSet(label: string): SkillSet {
-    const sets = listSkillSets();
+export async function saveSkillSet(label: string): Promise<SkillSet> {
+    const sets = await listSkillSets();
     const newSet: SkillSet = {
         id: crypto.randomUUID(),
         label,
@@ -227,16 +230,19 @@ export function saveSkillSet(label: string): SkillSet {
         createdAt: new Date().toISOString(),
     };
     sets.push(newSet);
-    localStorage.setItem(SKILLSETS_KEY, JSON.stringify(sets));
+    const db = await getDB();
+    await db.put(STORES.CONFIG, sets, SKILLSETS_KEY);
     return newSet;
 }
 
 /**
  * List all saved skill sets.
  */
-export function listSkillSets(): SkillSet[] {
+export async function listSkillSets(): Promise<SkillSet[]> {
     try {
-        return JSON.parse(localStorage.getItem(SKILLSETS_KEY) || '[]');
+        const db = await getDB();
+        const stored = await db.get(STORES.CONFIG, SKILLSETS_KEY);
+        return stored || [];
     } catch {
         return [];
     }
@@ -247,14 +253,16 @@ export function listSkillSets(): SkillSet[] {
  * This replaces all active skills and rebuilds the tool registry.
  * The workspace and persona are NOT affected.
  */
-export function swapSkillSet(setId: string): boolean {
-    const sets = listSkillSets();
+export async function swapSkillSet(setId: string): Promise<boolean> {
+    const sets = await listSkillSets();
     const target = sets.find((s) => s.id === setId);
     if (!target) return false;
 
     activeSkills = JSON.parse(JSON.stringify(target.skills));
-    saveActiveSkills();
-    localStorage.setItem(ACTIVE_SKILLSET_KEY, setId);
+    await saveActiveSkills();
+    
+    const db = await getDB();
+    await db.put(STORES.CONFIG, setId, ACTIVE_SKILLSET_KEY);
 
     emit('skills:swapped', { setId, label: target.label });
     emit('skills:tools-rebuilt');
@@ -264,19 +272,23 @@ export function swapSkillSet(setId: string): boolean {
 /**
  * Delete a skill set.
  */
-export function deleteSkillSet(setId: string): boolean {
-    const sets = listSkillSets();
+export async function deleteSkillSet(setId: string): Promise<boolean> {
+    const sets = await listSkillSets();
     const filtered = sets.filter((s) => s.id !== setId);
     if (filtered.length === sets.length) return false;
-    localStorage.setItem(SKILLSETS_KEY, JSON.stringify(filtered));
+    
+    const db = await getDB();
+    await db.put(STORES.CONFIG, filtered, SKILLSETS_KEY);
     return true;
 }
 
 /**
  * Get the active skill set ID (if any).
  */
-export function getActiveSkillSetId(): string | null {
-    return localStorage.getItem(ACTIVE_SKILLSET_KEY);
+export async function getActiveSkillSetId(): Promise<string | null> {
+    const db = await getDB();
+    const id = await db.get(STORES.CONFIG, ACTIVE_SKILLSET_KEY);
+    return id || null;
 }
 
 /**

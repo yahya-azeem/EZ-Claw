@@ -207,7 +207,8 @@
     justify-content: space-between;
     height: var(--header-height);
     padding: 0 var(--space-md);
-    border-bottom: 1px solid var(--border);
+    background: var(--color-bg);
+    border-bottom: 1px solid var(--border-subtle);
     flex-shrink: 0;
     z-index: 10;
   }
@@ -225,11 +226,13 @@
 
   .header-title h2 {
     font-size: var(--text-base);
-    font-weight: 600;
+    font-weight: 700;
+    color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 300px;
+    letter-spacing: -0.01em;
   }
 
   .header-right {
@@ -243,16 +246,16 @@
   }
 
   .status-dot {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
-    background: var(--error);
-    transition: background var(--transition);
+    background: var(--color-error);
+    transition: all var(--transition-fast);
   }
 
   .status-dot.active {
-    background: var(--success);
-    box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+    background: var(--color-success);
+    box-shadow: 0 0 8px var(--color-success);
   }
 
   @media (min-width: 768px) {

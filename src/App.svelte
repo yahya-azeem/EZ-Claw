@@ -23,6 +23,10 @@
     cloneClaw,
     activateClawLayers,
     killClaw,
+    updateClaw, // ADDED
+    deleteClaw, // ADDED
+    onClawsChange,
+    getAllClaws,
   } from "./bridge/claw-orchestrator";
   import {
     isValidProvider,
@@ -41,6 +45,8 @@
   import {
     initMemory,
   } from "./bridge/memory-bridge";
+  import { dbGet, dbPut } from "./bridge/db-bridge";
+  import { CLAW_DEFAULTS, EVENTS, WORKER } from "./bridge/constants";
 
   let wasmReady = $state(false);
   let loading = $state(true);
@@ -62,92 +68,80 @@
   let activeSessionId: string | null = $state(null);
 
   // Config state
-  let provider = $state("deepseek");
-  let model = $state("deepseek-chat");
+  let provider = $state(CLAW_DEFAULTS.PROVIDER);
+  let model = $state(CLAW_DEFAULTS.MODEL);
   let apiKey = $state("");
-  let temperature = $state(0.7);
+  let ghToken = $state("");
+  let temperature = $state(CLAW_DEFAULTS.TEMPERATURE);
   let apiUrl = $state("");
 
   onMount(async () => {
     try {
-      // Initialize storage first (always available)
       await initStorage();
-      initOrchestrator();
+      await initOrchestrator();
       initCloudSync();
 
-      // Initialize WASM core
+      onClawsChange(() => {
+        sessions = getAllClaws();
+      });
+
       try {
         await initWasm();
         wasmReady = true;
-
-        // Initialize memory system (Automated JSON store)
         await initMemory();
-        console.log("[EZ-Claw] Memory system initialized (Automated)");
-
       } catch (err) {
-        console.warn("[EZ-Claw] Initialization error:", err);
+        console.warn("[EZ-Claw] WASM Init Error:", err);
         initError = `Initialization error: ${err instanceof Error ? err.message : String(err)}`;
       }
 
-      // Load saved config
-      const savedProvider = await getConfig("provider");
-      const savedModel = await getConfig("model");
-      const savedApiKey = await getConfig("apiKey");
-      const savedTemp = await getConfig("temperature");
-      const savedApiUrl = await getConfig("apiUrl");
+      await loadProjectConfig();
 
-      // Force reset to OpenRouter if provider is unknown or novita (which has issues)
-      if (
-        savedProvider &&
-        (!isValidProvider(savedProvider) || savedProvider === "novita")
-      ) {
-        console.warn(
-          `[EZ-Claw] Invalid/unavailable provider "${savedProvider}", resetting to openrouter`,
-        );
-        provider = "openrouter";
-        await saveConfig("provider", provider);
-      } else if (savedProvider) {
-        provider = savedProvider;
-      }
-
-      if (savedModel) model = savedModel;
-      if (savedApiKey) apiKey = savedApiKey;
-      if (savedTemp) temperature = parseFloat(savedTemp);
-      if (savedApiUrl) apiUrl = savedApiUrl;
-
-      // Validate model for provider - reset to default if invalid
-      const providerValidModels = getValidModels(provider);
-      const isValid =
-        providerValidModels.length === 0 ||
-        providerValidModels.some((m) =>
-          model?.includes(m.split("/").pop() || m),
-        );
-      if (!isValid && model) {
-        console.warn(
-          `[EZ-Claw] Invalid model "${model}" for provider "${provider}", resetting to default`,
-        );
-        model = getDefaultModel(provider);
-        await saveConfig("model", model);
-      }
-
-      // Load sessions
       sessions = await getAllSessions();
       if (sessions.length > 0) {
         activeSessionId = sessions[0].id;
       }
 
-      // Show onboarding if no API key configured
-      if (!apiKey) {
-        showOnboarding = true;
-      }
-
+      if (!apiKey) showOnboarding = true;
       loading = false;
     } catch (err) {
-      console.error("[EZ-Claw] Init failed:", err);
+      console.error("[EZ-Claw] Bootstrap Failed:", err);
       initError = `Init failed: ${err instanceof Error ? err.message : String(err)}`;
       loading = false;
     }
   });
+
+  async function loadProjectConfig() {
+    const savedProvider = await getConfig("provider");
+    const savedModel = await getConfig("model");
+    const savedApiKey = await getConfig("apiKey");
+    const savedTemp = await getConfig("temperature");
+    const savedApiUrl = await getConfig("apiUrl");
+    
+    const ghSec = await dbGet("secrets", "GITHUB_TOKEN");
+    if (ghSec) ghToken = ghSec.value;
+
+    if (savedProvider && (!isValidProvider(savedProvider) || savedProvider === "novita")) {
+      provider = CLAW_DEFAULTS.FALLBACK_PROVIDER;
+      await saveConfig("provider", provider);
+    } else if (savedProvider) {
+      provider = savedProvider;
+    }
+
+    if (savedModel) model = savedModel;
+    if (savedApiKey) apiKey = savedApiKey;
+    if (savedTemp) temperature = parseFloat(savedTemp);
+    if (savedApiUrl) apiUrl = savedApiUrl;
+
+    // Model Validation
+    const validModels = getValidModels(provider);
+    const isValid = validModels.length === 0 || 
+                    validModels.some(m => model?.includes(m.split("/").pop() || m));
+                    
+    if (!isValid && model) {
+      model = getDefaultModel(provider);
+      await saveConfig("model", model);
+    }
+  }
 
   function handleNewClaw(name: string, cloneFromId?: string) {
     let claw;
@@ -175,8 +169,6 @@
     activeSessionId = claw.id;
     activateClawLayers(claw.id);
     showSidebar = false;
-    // Persist immediately to IndexedDB so claws survive refresh
-    saveSession(session);
   }
 
   function handleSelectSession(id: string) {
@@ -186,12 +178,11 @@
   }
 
   function handleDeleteSession(id: string) {
-    sessions = sessions.filter((s) => s.id !== id);
     if (activeSessionId === id) {
-      activeSessionId = sessions.length > 0 ? sessions[0].id : null;
+      const next = sessions.find((s) => s.id !== id);
+      activeSessionId = next ? next.id : null;
     }
-    // Also delete from IndexedDB
-    deleteSession(id);
+    deleteClaw(id); // Proxy to worker
   }
 
   function handleSessionUpdate(updated: SessionData) {
@@ -214,7 +205,7 @@
     showOnboarding = false;
 
     if (sessions.length === 0) {
-      handleNewClaw("My First Claw");
+      handleNewClaw(CLAW_DEFAULTS.NAME);
     }
   }
 </script>
@@ -237,7 +228,7 @@
       <h1>EZ-Claw</h1>
       <p style="color: var(--error);">Failed to load engine</p>
       <p
-        style="font-size: var(--text-xs); color: var(--text-tertiary); max-width: 400px; word-break: break-all;"
+        style="font-size: var(--text-xs); color: var(--text-dim); max-width: 400px; word-break: break-all;"
       >
         {initError}
       </p>
@@ -318,18 +309,35 @@
       {apiKey}
       {temperature}
       {apiUrl}
+      {ghToken}
+      sessionId={activeSessionId}
       onClose={() => (showSettings = false)}
       onSave={async (config) => {
+        // ALWAYS update local global states so Chat.svelte props see them
         provider = config.provider;
         model = config.model;
         apiKey = config.apiKey;
+        ghToken = config.ghToken;
         temperature = config.temperature;
         apiUrl = config.apiUrl;
-        await saveConfig("provider", config.provider);
-        await saveConfig("model", config.model);
-        await saveConfig("apiKey", config.apiKey);
-        await saveConfig("temperature", String(config.temperature));
-        await saveConfig("apiUrl", config.apiUrl);
+
+        if (config.sessionId) {
+          // Update specific claw in worker
+          await updateClaw(config.sessionId, {
+            provider: config.provider,
+            model: config.model,
+            temperature: config.temperature,
+            apiUrl: config.apiUrl,
+          });
+        } else {
+          // Persist as global defaults
+          await saveConfig("provider", config.provider);
+          await saveConfig("model", config.model);
+          await saveConfig("apiKey", config.apiKey);
+          await dbPut("secrets", { key: "GITHUB_TOKEN", value: config.ghToken });
+          await saveConfig("temperature", String(config.temperature));
+          await saveConfig("apiUrl", config.apiUrl);
+        }
         showSettings = false;
       }}
     />
@@ -366,7 +374,7 @@
     align-items: center;
     justify-content: center;
     height: 100dvh;
-    background: var(--bg-primary);
+    background: var(--color-bg);
   }
 
   .loading-logo {
@@ -386,6 +394,8 @@
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    font-weight: 800;
+    letter-spacing: -0.02em;
     margin-bottom: var(--space-sm);
   }
 
@@ -397,8 +407,8 @@
 
   .loading-bar {
     width: 200px;
-    height: 3px;
-    background: var(--bg-tertiary);
+    height: 4px;
+    background: var(--color-surface-elevated);
     border-radius: var(--radius-full);
     margin: 0 auto;
     overflow: hidden;
@@ -409,6 +419,7 @@
     height: 100%;
     background: var(--accent-gradient);
     border-radius: var(--radius-full);
+    box-shadow: 0 0 12px var(--color-primary-glow);
     animation: loadingSlide 1.5s ease-in-out infinite;
   }
 

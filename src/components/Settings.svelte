@@ -6,6 +6,7 @@
     NO_KEY_PROVIDERS,
     type ProviderDef,
   } from "../bridge/providers";
+  import { CLAW_DEFAULTS, TIMEOUTS } from "../bridge/constants";
 
   interface Props {
     provider: string;
@@ -13,25 +14,40 @@
     apiKey: string;
     temperature: number;
     apiUrl: string;
+    sessionId?: string | null;
+    ghToken: string;
     onClose: () => void;
     onSave: (config: {
       provider: string;
       model: string;
       apiKey: string;
+      ghToken: string;
       temperature: number;
       apiUrl: string;
+      sessionId?: string | null;
     }) => void;
   }
 
-  let { provider, model, apiKey, temperature, apiUrl, onClose, onSave }: Props =
-    $props();
+  let { 
+    provider, 
+    model, 
+    apiKey, 
+    ghToken,
+    temperature, 
+    apiUrl, 
+    sessionId, // ADDED
+    onClose, 
+    onSave 
+  }: Props = $props();
 
   let localProvider = $state(provider);
   let localModel = $state(model);
   let localApiKey = $state(apiKey);
+  let localGhToken = $state(ghToken);
   let localTemp = $state(temperature);
   let localApiUrl = $state(apiUrl);
   let showApiKey = $state(false);
+  let showGhToken = $state(false);
   let exportStatus = $state("");
 
   const providers = PROVIDERS;
@@ -50,8 +66,10 @@
       provider: localProvider,
       model: localModel,
       apiKey: localApiKey,
+      ghToken: localGhToken,
       temperature: localTemp,
       apiUrl: localApiUrl,
+      sessionId, // Pass it back
     });
   }
 
@@ -66,7 +84,7 @@
       a.click();
       URL.revokeObjectURL(url);
       exportStatus = "✅ Exported!";
-      setTimeout(() => (exportStatus = ""), 3000);
+      setTimeout(() => (exportStatus = ""), TIMEOUTS.UI_STATUS_MSG_MS);
     } catch {
       exportStatus = "❌ Export failed";
     }
@@ -83,7 +101,7 @@
       try {
         const count = await importData(text);
         exportStatus = `✅ Imported ${count} sessions`;
-        setTimeout(() => (exportStatus = ""), 3000);
+        setTimeout(() => (exportStatus = ""), TIMEOUTS.UI_STATUS_MSG_MS);
       } catch {
         exportStatus = "❌ Import failed";
       }
@@ -97,7 +115,7 @@
 <div class="modal-overlay" onclick={onClose}>
   <div class="modal-content" onclick={(e) => e.stopPropagation()}>
     <div class="modal-header">
-      <h2>⚙️ Settings</h2>
+      <h2>⚙️ {sessionId ? "Claw" : "Global"} Settings</h2>
       <button
         class="btn btn-ghost btn-icon"
         onclick={onClose}
@@ -196,6 +214,29 @@
         {/if}
       </label>
 
+      {#if localProvider.startsWith("github-copilot")}
+        <label class="field github-token">
+          <span class="field-label">GitHub CLI Token (gho_...)</span>
+          <div class="api-key-wrapper">
+            <input
+              id="setting-gh-token"
+              name="gh-token"
+              class="input"
+              type={showGhToken ? "text" : "password"}
+              bind:value={localGhToken}
+              placeholder="Paste value from 'gh auth token'"
+            />
+            <button
+              class="btn btn-ghost btn-sm"
+              onclick={() => (showGhToken = !showGhToken)}
+            >
+              {showGhToken ? "🙈" : "👁️"}
+            </button>
+          </div>
+          <span class="field-hint">Required for GitHub Copilot providers.</span>
+        </label>
+      {/if}
+
       {#if localProvider === "custom" || getDefaultApiUrl(localProvider) || localProvider === "deepseek" || localProvider === "openrouter" || localProvider === "openai" || localProvider === "anthropic" || localProvider === "github-copilot"}
         <label class="field">
           <span class="field-label"
@@ -271,87 +312,86 @@
     margin-bottom: var(--space-lg);
   }
 
-  .modal-header h2 {
-    font-size: var(--text-xl);
+  .modal-content {
+    background: var(--color-bg);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-deep), 0 0 50px var(--color-primary-glow);
   }
 
-  .settings-section {
-    margin-bottom: var(--space-md);
+  .modal-header h2 {
+    font-size: var(--text-xl);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    background: var(--accent-gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
   }
 
   .settings-section h3 {
-    font-size: var(--text-base);
-    color: var(--text-secondary);
-    margin-bottom: var(--space-md);
-  }
-
-  .field {
-    display: block;
+    font-size: var(--text-sm);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--color-primary);
     margin-bottom: var(--space-md);
   }
 
   .field-label {
     display: block;
     font-size: var(--text-sm);
-    color: var(--text-secondary);
+    color: var(--text-primary);
     margin-bottom: var(--space-xs);
-    font-weight: 500;
+    font-weight: 600;
   }
 
   .field-hint {
     display: block;
     font-size: var(--text-xs);
-    color: var(--text-tertiary);
+    color: var(--text-dim);
     margin-top: var(--space-xs);
-  }
-
-  .api-key-wrapper {
-    display: flex;
-    gap: var(--space-xs);
-  }
-
-  .api-key-wrapper .input {
-    flex: 1;
   }
 
   .slider {
     width: 100%;
-    height: 4px;
+    height: 6px;
     -webkit-appearance: none;
     appearance: none;
-    background: var(--bg-tertiary);
+    background: var(--color-surface-elevated);
     border-radius: var(--radius-full);
     outline: none;
   }
 
   .slider::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
     border-radius: 50%;
-    background: var(--accent-primary);
+    background: var(--color-primary);
     cursor: pointer;
-    box-shadow: 0 0 6px var(--accent-glow);
+    box-shadow: 0 0 10px var(--color-primary);
+    transition: transform var(--transition-fast);
+  }
+
+  .slider::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
   }
 
   .slider-labels {
     display: flex;
     justify-content: space-between;
     font-size: var(--text-xs);
-    color: var(--text-tertiary);
+    color: var(--text-dim);
+    font-weight: 500;
     margin-top: var(--space-xs);
-  }
-
-  .data-actions {
-    display: flex;
-    gap: var(--space-sm);
-    flex-wrap: wrap;
   }
 
   .export-status {
     margin-top: var(--space-sm);
     font-size: var(--text-sm);
-    color: var(--text-secondary);
+    color: var(--color-success);
+    font-weight: 600;
   }
 
   .modal-footer {

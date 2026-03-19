@@ -82,74 +82,81 @@ const DEFAULT_USER: UserProfile = {
 
 // ── Load / Save ──
 
-export function loadIdentity(): AgentIdentity {
+import { getDB, STORES } from './db-bridge';
+
+export async function loadIdentity(): Promise<AgentIdentity> {
     try {
-        const stored = localStorage.getItem(IDENTITY_KEY);
+        const db = await getDB();
+        const stored = await db.get(STORES.CONFIG, IDENTITY_KEY);
         if (stored) {
-            return { ...DEFAULT_IDENTITY, ...JSON.parse(stored) };
+            return { ...DEFAULT_IDENTITY, ...stored };
         }
     } catch { /* ignore */ }
     return { ...DEFAULT_IDENTITY };
 }
 
-export function saveIdentity(identity: AgentIdentity): void {
+export async function saveIdentity(identity: AgentIdentity): Promise<void> {
     identity.updatedAt = new Date().toISOString();
-    localStorage.setItem(IDENTITY_KEY, JSON.stringify(identity));
+    const db = await getDB();
+    await db.put(STORES.CONFIG, identity, IDENTITY_KEY);
 }
 
-export function loadUser(): UserProfile {
+export async function loadUser(): Promise<UserProfile> {
     try {
-        const stored = localStorage.getItem(USER_KEY);
-        if (stored) return { ...DEFAULT_USER, ...JSON.parse(stored) };
+        const db = await getDB();
+        const stored = await db.get(STORES.CONFIG, USER_KEY);
+        if (stored) return { ...DEFAULT_USER, ...stored };
     } catch { /* ignore */ }
     return { ...DEFAULT_USER };
 }
 
-export function saveUser(user: UserProfile): void {
-    localStorage.setItem(USER_KEY, JSON.stringify(user));
+export async function saveUser(user: UserProfile): Promise<void> {
+    const db = await getDB();
+    await db.put(STORES.CONFIG, user, USER_KEY);
 }
 
 // ── Identity Operations ──
 
-export function updateIdentityField(field: keyof AgentIdentity, value: any): AgentIdentity {
-    const identity = loadIdentity();
+export async function updateIdentityField(field: keyof AgentIdentity, value: any): Promise<AgentIdentity> {
+    const identity = await loadIdentity();
     (identity as any)[field] = value;
-    saveIdentity(identity);
+    await saveIdentity(identity);
     return identity;
 }
 
-export function setFact(key: string, value: string): AgentIdentity {
-    const identity = loadIdentity();
+export async function setFact(key: string, value: string): Promise<AgentIdentity> {
+    const identity = await loadIdentity();
     identity.facts[key] = value;
     if (key === 'name' || key === 'my_name') {
         identity.name = value;
     }
-    saveIdentity(identity);
+    await saveIdentity(identity);
     return identity;
 }
 
-export function getFact(key: string): string | undefined {
-    return loadIdentity().facts[key];
+export async function getFact(key: string): Promise<string | undefined> {
+    const identity = await loadIdentity();
+    return identity.facts[key];
 }
 
 // ── First-Run Detection ──
 
-export function isFirstRun(): boolean {
-    const identity = loadIdentity();
+export async function isFirstRun(): Promise<boolean> {
+    const identity = await loadIdentity();
     return !identity.bootstrapped && !identity.name;
 }
 
-export function markBootstrapped(): void {
-    const identity = loadIdentity();
+export async function markBootstrapped(): Promise<void> {
+    const identity = await loadIdentity();
     identity.bootstrapped = true;
-    saveIdentity(identity);
+    await saveIdentity(identity);
 }
 
 // ── System Prompt Builder ──
 
-export function buildIdentityPrompt(): string {
-    const identity = loadIdentity();
-    const user = loadUser();
+export async function buildIdentityPrompt(): Promise<string> {
+    const identity = await loadIdentity();
+    const user = await loadUser();
     const parts: string[] = [];
 
     // Core personality (SOUL.md)
@@ -226,9 +233,9 @@ This is your birth. Make it count.`;
 
 // ── Reset ──
 
-export function resetIdentity(): AgentIdentity {
+export async function resetIdentity(): Promise<AgentIdentity> {
     const identity = { ...DEFAULT_IDENTITY, updatedAt: new Date().toISOString() };
-    saveIdentity(identity);
+    await saveIdentity(identity);
     return identity;
 }
 
@@ -248,10 +255,11 @@ export interface PersonaEntry {
 /**
  * List all saved personas.
  */
-export function listPersonas(): PersonaEntry[] {
+export async function listPersonas(): Promise<PersonaEntry[]> {
     try {
-        const stored = localStorage.getItem(PERSONAS_KEY);
-        if (stored) return JSON.parse(stored);
+        const db = await getDB();
+        const stored = await db.get(STORES.CONFIG, PERSONAS_KEY);
+        if (stored) return stored;
     } catch { /* ignore */ }
     return [];
 }
@@ -259,94 +267,103 @@ export function listPersonas(): PersonaEntry[] {
 /**
  * Save the entire personas list.
  */
-function savePersonas(personas: PersonaEntry[]): void {
-    localStorage.setItem(PERSONAS_KEY, JSON.stringify(personas));
+async function savePersonas(personas: PersonaEntry[]): Promise<void> {
+    const db = await getDB();
+    await db.put(STORES.CONFIG, personas, PERSONAS_KEY);
 }
 
 /**
  * Get the active persona ID.
  */
-export function getActivePersonaId(): string | null {
-    return localStorage.getItem(ACTIVE_PERSONA_KEY);
+export async function getActivePersonaId(): Promise<string | null> {
+    const db = await getDB();
+    const id = await db.get(STORES.CONFIG, ACTIVE_PERSONA_KEY);
+    return id || null;
 }
 
 /**
  * Create a new persona from the current identity, or a blank one.
  */
-export function createPersona(label: string, fromCurrent: boolean = false): PersonaEntry {
+export async function createPersona(label: string, fromCurrent: boolean = false): Promise<PersonaEntry> {
     const id = crypto.randomUUID();
+    const identity = fromCurrent ? await loadIdentity() : { ...DEFAULT_IDENTITY };
+    const user = fromCurrent ? await loadUser() : { ...DEFAULT_USER };
+    
     const entry: PersonaEntry = {
         id,
         label,
-        identity: fromCurrent ? { ...loadIdentity() } : { ...DEFAULT_IDENTITY },
-        user: fromCurrent ? { ...loadUser() } : { ...DEFAULT_USER },
+        identity,
+        user,
         createdAt: new Date().toISOString(),
     };
-    const personas = listPersonas();
+    const personas = await listPersonas();
     personas.push(entry);
-    savePersonas(personas);
+    await savePersonas(personas);
     return entry;
 }
 
 /**
  * Save the current active identity as a persona (snapshot).
  */
-export function saveCurrentAsPersona(label: string): PersonaEntry {
-    return createPersona(label, true);
+export async function saveCurrentAsPersona(label: string): Promise<PersonaEntry> {
+    return await createPersona(label, true);
 }
 
 /**
  * Switch to a persona — loads its identity + user profile into active slots.
  */
-export function switchPersona(personaId: string): boolean {
-    const personas = listPersonas();
+export async function switchPersona(personaId: string): Promise<boolean> {
+    const personas = await listPersonas();
     const persona = personas.find(p => p.id === personaId);
     if (!persona) return false;
 
     // Save current identity back to its persona slot first
-    const currentId = getActivePersonaId();
+    const currentId = await getActivePersonaId();
     if (currentId) {
         const current = personas.find(p => p.id === currentId);
         if (current) {
-            current.identity = loadIdentity();
-            current.user = loadUser();
-            savePersonas(personas);
+            current.identity = await loadIdentity();
+            current.user = await loadUser();
+            await savePersonas(personas);
         }
     }
 
     // Load selected persona
-    saveIdentity(persona.identity);
-    saveUser(persona.user);
-    localStorage.setItem(ACTIVE_PERSONA_KEY, personaId);
+    await saveIdentity(persona.identity);
+    await saveUser(persona.user);
+    
+    const db = await getDB();
+    await db.put(STORES.CONFIG, personaId, ACTIVE_PERSONA_KEY);
     return true;
 }
 
 /**
  * Update a persona's snapshot from the live identity.
  */
-export function syncPersonaFromLive(personaId: string): void {
-    const personas = listPersonas();
+export async function syncPersonaFromLive(personaId: string): Promise<void> {
+    const personas = await listPersonas();
     const persona = personas.find(p => p.id === personaId);
     if (persona) {
-        persona.identity = loadIdentity();
-        persona.user = loadUser();
-        savePersonas(personas);
+        persona.identity = await loadIdentity();
+        persona.user = await loadUser();
+        await savePersonas(personas);
     }
 }
 
 /**
  * Delete a persona by ID.
  */
-export function deletePersona(personaId: string): boolean {
-    const personas = listPersonas();
+export async function deletePersona(personaId: string): Promise<boolean> {
+    const personas = await listPersonas();
     const idx = personas.findIndex(p => p.id === personaId);
     if (idx === -1) return false;
     personas.splice(idx, 1);
-    savePersonas(personas);
+    await savePersonas(personas);
 
     // If deleting the active persona, clear the active marker
-    if (getActivePersonaId() === personaId) {
-        localStorage.removeItem(ACTIVE_PERSONA_KEY);
+    if (await getActivePersonaId() === personaId) {
+        const db = await getDB();
+        await db.delete(STORES.CONFIG, ACTIVE_PERSONA_KEY);
     }
     return true;
 }
@@ -354,25 +371,25 @@ export function deletePersona(personaId: string): boolean {
 /**
  * Rename a persona.
  */
-export function renamePersona(personaId: string, newLabel: string): boolean {
-    const personas = listPersonas();
+export async function renamePersona(personaId: string, newLabel: string): Promise<boolean> {
+    const personas = await listPersonas();
     const persona = personas.find(p => p.id === personaId);
     if (!persona) return false;
     persona.label = newLabel;
-    savePersonas(personas);
+    await savePersonas(personas);
     return true;
 }
 
 /**
  * Export all personas (+ current active) as a portable JSON string.
  */
-export function exportPersonas(): string {
+export async function exportPersonas(): Promise<string> {
     return JSON.stringify({
         version: 1,
-        activeIdentity: loadIdentity(),
-        activeUser: loadUser(),
-        activePersonaId: getActivePersonaId(),
-        personas: listPersonas(),
+        activeIdentity: await loadIdentity(),
+        activeUser: await loadUser(),
+        activePersonaId: await getActivePersonaId(),
+        personas: await listPersonas(),
         exportedAt: new Date().toISOString(),
     }, null, 2);
 }
@@ -380,13 +397,13 @@ export function exportPersonas(): string {
 /**
  * Import personas from a JSON string. Returns count imported.
  */
-export function importPersonas(json: string): number {
+export async function importPersonas(json: string): Promise<number> {
     const data = JSON.parse(json);
     if (!data.version || !data.personas) {
         throw new Error('Invalid persona export file');
     }
 
-    const existing = listPersonas();
+    const existing = await listPersonas();
     const existingIds = new Set(existing.map(p => p.id));
 
     let count = 0;
@@ -396,14 +413,16 @@ export function importPersonas(json: string): number {
             count++;
         }
     }
-    savePersonas(existing);
+    await savePersonas(existing);
 
     // If there's an active identity in the export and user has none, load it
-    if (data.activeIdentity && !loadIdentity().name) {
-        saveIdentity(data.activeIdentity);
+    const currentName = (await loadIdentity()).name;
+    if (data.activeIdentity && !currentName) {
+        await saveIdentity(data.activeIdentity);
     }
-    if (data.activeUser && !loadUser().name) {
-        saveUser(data.activeUser);
+    const currentUserName = (await loadUser()).name;
+    if (data.activeUser && !currentUserName) {
+        await saveUser(data.activeUser);
     }
 
     return count;
