@@ -53,10 +53,12 @@ export const TIMEOUTS = {
 };
 
 export const STORAGE = {
-    DB_NAME: 'ezclaw-db',
+    DB_NAME: 'ezclaw-db-v4',
     STORES: {
         SESSIONS: 'sessions',
+        CONFIG: 'config',
         SECRETS: 'secrets',
-        MEMORY: 'memory',
+        MEMORIES: 'memories',
+        WORKSPACE: 'workspace',
     }
 };

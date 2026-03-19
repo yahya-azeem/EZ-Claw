@@ -64,14 +64,20 @@ async function handleLoad(payload) {
     });
 
     const wasi = createWasiShim(image);
-    // Parallel download + compile — this is much faster for large binaries
-    const result = await WebAssembly.instantiateStreaming(
-        new Response(response.body.pipeThrough(progressStream), {
-            headers: { "Content-Type": "application/wasm" }
-        }), 
-        { wasi_snapshot_preview1: wasi, wasi_unstable: wasi }
-    );
-    wasmInstance = result.instance;
+    try {
+        const result = await WebAssembly.instantiateStreaming(
+            new Response(response.body.pipeThrough(progressStream), {
+                headers: { "Content-Type": "application/wasm" }
+            }), 
+            { wasi_snapshot_preview1: wasi, wasi_unstable: wasi }
+        );
+        wasmInstance = result.instance;
+    } catch (e) {
+        if (e.message.includes('section') || e.message.includes('bounds')) {
+            throw new Error(`CRITICAL: WASM file is truncated or corrupted (Received ${received} bytes). Expected ~124MB for Alpine. Please re-download.¹`);
+        }
+        throw e;
+    }
     emitMsg('log', { message: 'WASM Instance created, signaling ready' });
     emitMsg('ready');
 

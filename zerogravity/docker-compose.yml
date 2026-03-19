@@ -1,0 +1,13 @@
+services:
+  zerogravity:
+    container_name: zerogravity
+    image: ghcr.io/nikketryhard/zerogravity:latest
+    restart: unless-stopped
+    ports:
+      - "8741:8741"
+      - "443:443"
+    volumes:
+      - ./accounts.json:/root/.config/zerogravity/accounts.json
+      - ./aliases.json:/root/.config/zerogravity/aliases.json
+    environment:
+      - RUST_LOG=info

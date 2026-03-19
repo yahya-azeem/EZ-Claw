@@ -7,17 +7,12 @@
  */
 
 import { openDB, type IDBPDatabase } from 'idb';
+import { STORAGE } from './constants';
 
-const DB_NAME = 'ezclaw-db-v4';
+const DB_NAME = STORAGE.DB_NAME;
 const DB_VERSION = 1;
 
-export const STORES = {
-    SESSIONS: 'sessions',
-    CONFIG: 'config',
-    SECRETS: 'secrets',
-    MEMORIES: 'memories',
-    WORKSPACE: 'workspace'
-};
+export const STORES = STORAGE.STORES;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 

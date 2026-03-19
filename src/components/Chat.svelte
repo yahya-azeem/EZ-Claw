@@ -66,6 +66,7 @@
           messages = claw.messages;
           lastStatus = (claw as any).lastStatus;
           lastError = (claw as any).lastError;
+          isStreaming = claw.status === 'running' || !!lastStatus;
         }
       });
       return unsub;
@@ -212,10 +213,10 @@
       />
     {/if}
 
-    {#if toolActivity || lastStatus}
+    {#if isStreaming || lastStatus}
       <div class="tool-activity">
         <span class="tool-spinner"></span>
-        <span>{lastStatus || toolActivity}</span>
+        <span class="thinking-label">{lastStatus || toolActivity || "Thinking..."}</span>
       </div>
     {/if}
   </div>

@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import WebSocket from 'ws';
 import { CopilotClient } from '@github/copilot-sdk';
+import { EVENTS } from '../bridge/constants';
 
 /**
  * EZ-Claw Developer CLI v1.0
@@ -45,19 +46,21 @@ async function sendCommand(type: string, payload: any, waitForResponse = false) 
             try {
                 const msg = JSON.parse(data.toString());
                 
-                if (type === 'STATE_SYNC_REQ' && msg.type === 'STATE_SYNC') {
+        if (type === 'STATE_SYNC_REQ' && (msg.type === 'STATE_SYNC' || msg.type === EVENTS.INIT_SUCCESS)) {
                     clearTimeout(timeout);
                     resolve(msg.payload);
-                    ws.close();
+                    if (!waitForResponse) ws.close(); // Only keep open if we are following
                 }
 
-                if (waitForResponse && msg.type === 'MESSAGE_ADD') {
+                if (msg.type === EVENTS.MESSAGE_ADD || (waitForResponse && msg.type === 'MESSAGE_ADD')) {
                     const { clawId, message } = msg.payload;
-                    if (message.role === 'assistant') {
-                        console.log(`\n[Assistant] ${message.content}`);
+                    const roleLabel = message.role === 'assistant' ? 'Assistant' : message.role === 'tool' ? 'Tool' : 'User';
+                    console.log(`\n[${roleLabel}] ${message.content || '(Tool Call)'}`);
+                    
+                    if (waitForResponse && message.role === 'assistant') {
                         clearTimeout(timeout);
                         clearTimeout(totalTimeout);
-                        ws.close();
+                        // ws.close(); // Don't close, keep following
                         resolve(msg.payload);
                     }
                 }

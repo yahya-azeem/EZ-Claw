@@ -96,9 +96,12 @@
 
       await loadProjectConfig();
 
-      sessions = await getAllSessions();
-      if (sessions.length > 0) {
-        activeSessionId = sessions[0].id;
+      // sessions = await getAllSessions(); 
+      // Removed redundant local DB load; rely on Orchestrator INIT/STATE_UPDATED
+      const workerClaws = getAllClaws();
+      if (workerClaws.length > 0) {
+        sessions = workerClaws;
+        if (!activeSessionId) activeSessionId = sessions[0].id;
       }
 
       if (!apiKey) showOnboarding = true;

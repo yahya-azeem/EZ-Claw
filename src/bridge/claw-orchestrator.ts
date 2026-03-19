@@ -29,6 +29,7 @@ let _claws: Map<string, SessionData> = new Map();
 let _listeners: Array<() => void> = [];
 let _worker: any = null;
 let _initPromise: Promise<void> | null = null;
+let _broadcast: BroadcastChannel | null = null;
 
 // ── Helpers ───────────────────────────────────────────────────────
 
@@ -57,9 +58,20 @@ async function _initWorker(): Promise<any> {
             
             console.log('[Claw Orchestrator] Proxy connected to Central Worker');
         } else {
-            // Fallback for non-SharedWorker environments
+            // Fallback for non-SharedWorker environments (Safari/Mobile)
+            console.warn('[Claw Orchestrator] SharedWorker not supported - using BroadcastChannel fallback');
             _worker = new Worker(workerUrl, { type: WORKER.TYPE });
-            _worker.onmessage = (e) => _handleWorkerEvent(e.data);
+            _worker.onmessage = (e: MessageEvent) => _handleWorkerEvent(e.data);
+            
+            // Initialize BroadcastChannel for cross-tab sync in Safari
+            _broadcast = new BroadcastChannel('ezclaw-sync');
+            _broadcast.onmessage = (e) => {
+                if (e.data.type === 'SYNC_STATE') {
+                    _claws = new Map(e.data.claws.map((c: any) => [c.id, c]));
+                    _notify();
+                }
+            };
+
             _worker.postMessage({ type: EVENTS.INIT });
         }
     })();
@@ -76,6 +88,9 @@ function _handleWorkerEvent(event: any) {
         case EVENTS.INIT_SUCCESS:
             if (payload && payload.claws) {
                 _claws = new Map(payload.claws.map((c: any) => [c.id, c]));
+                if (_broadcast) {
+                    _broadcast.postMessage({ type: 'SYNC_STATE', claws: Array.from(_claws.values()) });
+                }
                 _notify();
             }
             break;

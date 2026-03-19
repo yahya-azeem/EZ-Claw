@@ -183,21 +183,31 @@ async function handleMessage(event: MessageEvent, port: MessagePort | any) {
                 break;
 
             case EVENTS.INIT:
-                await ensureWasmInitialized();
-                await initSync(); // Also init bridge connection from worker
-                
-                // Load existing state from DB on first init
-                if (_claws.size === 0) {
-                    const db = await getDB();
-                    const all = await db.getAll(STORES.SESSIONS);
-                    _claws = new Map(all.map(s => [s.id, s]));
-                }
-                
-                port.postMessage({ 
-                    type: EVENTS.INIT_SUCCESS, 
-                    payload: { claws: Array.from(_claws.values()) },
-                    requestId 
-                });
+                (async () => {
+                    try {
+                        // Load from DB first (Critical State)
+                        if (_claws.size === 0) {
+                            const db = await getDB();
+                            const all = await db.getAll(STORES.SESSIONS);
+                            _claws = new Map(all.map(s => [s.id as string, s]));
+                            console.log(`[Worker] Loaded ${_claws.size} sessions from DB`);
+                        }
+                        
+                        // Signal success immediately so UI shows existing Claws
+                        port.postMessage({ 
+                            type: EVENTS.INIT_SUCCESS, 
+                            payload: { claws: Array.from(_claws.values()) },
+                            requestId 
+                        });
+
+                        // Defer secondary inits
+                        ensureWasmInitialized().catch(e => console.error("[Worker] WASM defer failed:", e));
+                        initSync().catch(e => console.error("[Worker] Sync defer failed:", e));
+                    } catch (err: any) {
+                        console.error("[Worker] INIT FATAL:", err);
+                        port.postMessage({ type: 'ERROR', payload: { message: err.message }, requestId });
+                    }
+                })();
                 break;
 
             case EVENTS.GET_CLAWS:
@@ -396,7 +406,8 @@ async function handleRunTask(payload: any, port: MessagePort | any) {
                     const toolArgs = tc.function?.arguments || tc.arguments || '{}';
                     const toolId = tc.id || crypto.randomUUID();
 
-                    broadcast({ type: 'TASK_STATUS', payload: { clawId, status: `🔧 Running: ${toolName}...` } });
+                    const argsSummary = toolArgs.length > 30 ? toolArgs.slice(0, 30) + '...' : toolArgs;
+                    broadcast({ type: 'TASK_STATUS', payload: { clawId, status: `🔧 Running: ${toolName}(${argsSummary})` } });
 
                     let result: string;
                     try {
