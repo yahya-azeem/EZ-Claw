@@ -45,11 +45,15 @@ async function sendCommand(type: string, payload: any, waitForResponse = false) 
         ws.on('message', (data) => {
             try {
                 const msg = JSON.parse(data.toString());
+                console.log(`[CLI DEBUG] 📥 Received Type: ${msg.type}`);
                 
-        if (type === 'STATE_SYNC_REQ' && (msg.type === 'STATE_SYNC' || msg.type === EVENTS.INIT_SUCCESS)) {
+                const isStateSync = msg.type === 'STATE_SYNC' || msg.type === 'STATE_UPDATED' || msg.type === EVENTS.INIT_SUCCESS;
+
+                if (type === 'STATE_SYNC_REQ' && isStateSync) {
+                    console.log('[CLI DEBUG] ✅ State sync successful.');
                     clearTimeout(timeout);
                     resolve(msg.payload);
-                    if (!waitForResponse) ws.close(); // Only keep open if we are following
+                    if (!waitForResponse) ws.close(); 
                 }
 
                 if (msg.type === EVENTS.MESSAGE_ADD || (waitForResponse && msg.type === 'MESSAGE_ADD')) {

@@ -34,19 +34,29 @@ let _ws: WebSocket | null = null;
 async function initSync() {
     if (_ws) return;
     try {
+        console.log(`[Claw Worker] Attempting to connect to bridge: ${NETWORK.BRIDGE_RELAY_URL}`);
         _ws = new WebSocket(NETWORK.BRIDGE_RELAY_URL);
-        _ws.onopen = () => console.log('[Claw Worker] Connected to Bridge');
+        _ws.onopen = () => console.log('[Claw Worker] ✅ Connected to Bridge Relay');
         _ws.onmessage = (e) => {
+            console.log('[Claw Worker] 📥 Received Bridge Message:', e.data);
             try {
                 const { type, payload } = JSON.parse(e.data);
                 handleRemoteCommand(type, payload);
-            } catch {}
+            } catch (err) {
+                console.error('[Claw Worker] ❌ JSON Parse Error:', err);
+            }
         };
         _ws.onclose = () => {
+            console.warn('[Claw Worker] ⚠️ Bridge connection closed. Retrying...');
             _ws = null;
             setTimeout(initSync, NETWORK.RETRY_INTERVAL_MS);
         };
-    } catch {}
+        _ws.onerror = (err) => {
+            console.error('[Claw Worker] ❌ Bridge Socket Error:', err);
+        };
+    } catch (err) {
+        console.error('[Claw Worker] ❌ Failed to create WebSocket:', err);
+    }
 }
 
 async function handleRemoteCommand(type: string, payload: any) {
@@ -132,7 +142,13 @@ if (typeof (self as any).onconnect !== 'undefined') {
         port.onmessage = (msg: MessageEvent) => handleMessage(msg, port);
         port.start();
         console.log('[Claw Worker] SharedWorker client connected.');
+        
+        // Proactive sync on connect
+        initSync().catch(e => console.error("[Worker] Startup sync failed:", e));
     };
+} else {
+    // Top-level sync for Dedicated/Service Workers
+    initSync().catch(e => console.error("[Worker] Startup sync failed:", e));
 }
 
 // 2. ServiceWorker Support
@@ -177,6 +193,14 @@ async function handleMessage(event: MessageEvent, port: MessagePort | any) {
             return;
         }
 
+        // 1. Unified Event Aliasing (CLI support)
+        if (type === 'STATE_SYNC_REQ') {
+             // Worker uses type natively
+        }
+        if (type === 'REMOTE_CHAT' && payload) {
+            // Map remote chat to internal task run
+        }
+
         switch (type) {
             case EVENTS.PING:
                 port.postMessage({ type: EVENTS.PONG, requestId });
@@ -211,6 +235,7 @@ async function handleMessage(event: MessageEvent, port: MessagePort | any) {
                 break;
 
             case EVENTS.GET_CLAWS:
+            case 'STATE_SYNC_REQ':
                 port.postMessage({ 
                     type: EVENTS.STATE_UPDATED, 
                     payload: { claws: Array.from(_claws.values()) },
@@ -459,8 +484,17 @@ async function broadcast(msg: any) {
         clients.forEach((client: any) => client.postMessage(msg));
     }
 
-    // 3. Fallback for Dedicated Worker
-    if (ports.size === 0 && !(self as any).clients) {
+    // 3. Broadcast to Bridge Relay (CLI Sync)
+    if (_ws && _ws.readyState === 1) { // 1 = WebSocket.OPEN
+        try {
+            _ws.send(JSON.stringify(msg));
+        } catch (err) {
+            console.error('[Claw Worker] Failed to send to Bridge:', err);
+        }
+    }
+
+    // 4. Fallback for Dedicated Worker
+    if (ports.size === 0 && !(self as any).clients && !(_ws && _ws.readyState === 1)) {
         (self as any).postMessage(msg);
     }
 }
