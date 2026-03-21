@@ -64,5 +64,5 @@ docker-compose up -d dev
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=yahya-azeem/EZ-Claw&type=Date)](https://star-history.com/#yahya-azeem/EZ-Claw&Date)
+[![Star History Chart](https://www.star-history.com/?repos=yahya-azeem%2FEZ-Claw&type=date&legend=top-left)
 
