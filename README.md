@@ -2,14 +2,9 @@
 
 An entirely client-sided, WebAssembly-powered AI agent running right in your browser.
 
-**License:** Copyright © 2026 [yahya-azeem]. All Rights Reserved.
-License Terms:
-1. Permission is hereby granted to use, copy, and redistribute this software in its original, unmodified form for both commercial and non-commercial purposes, provided that the following conditions are met:
-2. Attribution: Proper credit is given to the original author ([yahya-azeem]) and the copyright notice above is included.
-3. No Modification: Modification, adaptation, translation, or creation of derivative works is strictly prohibited without prior written permission from the copyright holder.
-4. No Unauthorized Monetization: While the software may be used for commercial purposes (e.g., in a company's internal tools), the software itself may not be sold, sublicensed, or bundled for profit by any party other than the original author.
-5. Contributions and improvements are welcome and may be submitted to the original author for inclusion in official versions.
-6. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+**License:** [GNU Affero General Public License v3.0 (AGPL-3.0)](https://www.gnu.org/licenses/agpl-3.0.html)
+
+This project is licensed under the GNU Affero General Public License v3.0 (Affero GPL). You are free to use, modify, and distribute this software under the terms of the AGPL-3.0. Any modified versions or software that uses this code over a network must also be released under the AGPL-3.0 and made publicly available. See the [LICENSE](./LICENSE) file for full details.
 
    
 ## 🌟 The Vision & Principles
@@ -55,4 +50,19 @@ We provide a `docker-compose.yml` for quick isolated building.
 docker-compose build dev
 docker-compose up -d dev
 ```
+
+---
+
+## 🔮 Future Plans
+
+- [ ] **iPhone App**: Port EZ-Claw to a native iOS iPhone application, bringing the full client-sided, privacy-first AI agent experience to mobile. The app will leverage on-device compute where possible and maintain the same zero-backend architecture.
+- [ ] **Expanded Sandbox Tiers**: Deeper integration with CheerpX for more capable in-browser shell execution.
+- [ ] **Plugin Ecosystem**: Allow community-built tools and personas to be installed directly from the UI.
+- [ ] **Offline-First LLM**: Bundle lightweight local models (e.g., via WebLLM) so EZ-Claw can run with zero network access.
+
+---
+
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=yahya-azeem/EZ-Claw&type=Date)](https://star-history.com/#yahya-azeem/EZ-Claw&Date)
 
