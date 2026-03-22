@@ -2,11 +2,18 @@
 
 An entirely client-sided, WebAssembly-powered AI agent running right in your browser.
 
+## 🌐 Live Demo
+You can access the hosted version of EZ-Claw here:
+**[https://yahya-azeem.github.io/EZ-Claw/](https://yahya-azeem.github.io/EZ-Claw/)**
+
+![EZ-Claw Illustration](assets/ez-claw-illustration.jpg)
+
 **License:** [GNU Affero General Public License v3.0 (AGPL-3.0)](https://www.gnu.org/licenses/agpl-3.0.html)
 
 This project is licensed under the GNU Affero General Public License v3.0 (Affero GPL). You are free to use, modify, and distribute this software under the terms of the AGPL-3.0. Any modified versions or software that uses this code over a network must also be released under the AGPL-3.0 and made publicly available. See the [LICENSE](./LICENSE) file for full details.
 
-   
+---
+
 ## 🌟 The Vision & Principles
 
 EZ-Claw is designed to be as **featured and functional as OpenClaw**, as **secure as IronClaw**, and as **efficient as ZeroClaw**, all while maintaining an accessible, beautiful interface for everyday users ("normies"). 
@@ -39,17 +46,32 @@ EZ-Claw is designed to be as **featured and functional as OpenClaw**, as **secur
 
 ---
 
-## How to use:
-   (click this link) -->  https://yahya-azeem.github.io/EZ-Claw/
+## 🏗️ Manual Build & Local Development
 
+To run EZ-Claw locally, you need [Node.js](https://nodejs.org/) and the [Rust toolchain](https://rustup.rs/) (with `wasm-pack`).
 
-
-### OR Docker Self Hosting Deployment (Optional)
-We provide a `docker-compose.yml` for quick isolated building.
+### 1. Install Dependencies
 ```bash
-docker-compose build dev
-docker-compose up -d dev
+npm install
 ```
+
+### 2. Build the WASM Core
+```bash
+npm run wasm:build
+```
+
+### 3. Start Development Server
+```bash
+npm run dev
+```
+
+The application will be available at `http://localhost:5173`.
+
+### 4. Build for Production
+```bash
+npm run build:all
+```
+The production assets will be in the `dist/` directory.
 
 ---
 
@@ -63,7 +85,6 @@ docker-compose up -d dev
 ---
 
 ## ⭐ Star History
-## Star History
 
 <a href="https://www.star-history.com/?repos=yahya-azeem%2FEZ-Claw&type=date&legend=top-left">
  <picture>
