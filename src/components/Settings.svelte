@@ -237,7 +237,7 @@
         </label>
       {/if}
 
-      {#if localProvider === "custom" || getDefaultApiUrl(localProvider) || localProvider === "deepseek" || localProvider === "openrouter" || localProvider === "openai" || localProvider === "anthropic" || localProvider === "github-copilot"}
+      {#if localProvider === "custom" || getDefaultApiUrl(localProvider) || localProvider === "openrouter" || localProvider === "openai" || localProvider === "anthropic" || localProvider === "github-copilot"}
         <label class="field">
           <span class="field-label"
             >API URL {localProvider !== "custom" ? "(optional)" : ""}</span

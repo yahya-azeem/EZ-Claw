@@ -28,7 +28,7 @@ export type ClawStatus = 'running' | 'frozen' | 'killed';
 let _claws: Map<string, SessionData> = new Map();
 let _listeners: Array<() => void> = [];
 let _worker: any = null;
-let _initPromise: Promise<void> | null = null;
+let _initPromise: Promise<any> | null = null;
 let _broadcast: BroadcastChannel | null = null;
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -43,27 +43,30 @@ async function _initWorker(): Promise<any> {
     if (_worker) return _worker;
     if (_initPromise) return _initPromise;
 
-    const workerUrl = new URL('../worker/claw-worker.ts', import.meta.url).href;
+    // Use a static URL for Vite's static analysis to correctly bundle the worker
+    const workerUrl = new URL('../worker/claw-worker.ts', import.meta.url);
+    console.log(`[Orchestrator] Initializing DedicatedWorker at ${workerUrl}`);
 
     _initPromise = (async () => {
-        if (typeof SharedWorker !== 'undefined') {
-            const sw = new SharedWorker(workerUrl, { type: WORKER.TYPE, name: WORKER.NAME });
-            _worker = sw.port as any;
-            (_worker as any).onmessage = (e: MessageEvent) => _handleWorkerEvent(e.data);
-            (_worker as any).start();
+        try {
+            const worker = new Worker(workerUrl, { type: WORKER.TYPE, name: WORKER.NAME });
+            _worker = worker as any; // Cast for simplified postMessage usage
+
+            worker.onmessage = (e) => {
+                const data = e.data;
+                if (data.type === 'CONNECTED') {
+                    console.log(`[Orchestrator] Worker connected successfully`);
+                }
+                _handleWorkerEvent(data);
+            };
+
+            worker.onerror = (err) => {
+                console.error('[Orchestrator] Worker Error:', err);
+                _initPromise = null;
+                _worker = null;
+            };
             
-            // Initial sync
-            _worker.postMessage({ type: EVENTS.INIT });
-            _worker.postMessage({ type: EVENTS.GET_CLAWS });
-            
-            console.log('[Claw Orchestrator] Proxy connected to Central Worker');
-        } else {
-            // Fallback for non-SharedWorker environments (Safari/Mobile)
-            console.warn('[Claw Orchestrator] SharedWorker not supported - using BroadcastChannel fallback');
-            _worker = new Worker(workerUrl, { type: WORKER.TYPE });
-            _worker.onmessage = (e: MessageEvent) => _handleWorkerEvent(e.data);
-            
-            // Initialize BroadcastChannel for cross-tab sync in Safari
+            // Initialize BroadcastChannel for cross-tab sync
             _broadcast = new BroadcastChannel('ezclaw-sync');
             _broadcast.onmessage = (e) => {
                 if (e.data.type === 'SYNC_STATE') {
@@ -72,12 +75,16 @@ async function _initWorker(): Promise<any> {
                 }
             };
 
-            _worker.postMessage({ type: EVENTS.INIT });
+            worker.postMessage({ type: EVENTS.INIT });
+            return worker;
+        } catch (err) {
+            console.error('[Orchestrator] Failed to start Worker:', err);
+            _initPromise = null;
+            throw err;
         }
     })();
 
-    await _initPromise;
-    return _worker;
+    return _initPromise;
 }
 
 function _handleWorkerEvent(event: any) {
@@ -113,6 +120,7 @@ function _handleWorkerEvent(event: any) {
             const claw = _claws.get(payload.clawId);
             if (claw) {
                 (claw as any).lastStatus = null;
+                (claw as any).lastError = null;
                 _notify();
             }
             break;
@@ -200,10 +208,20 @@ export async function createClaw(
 
 export async function runClawTask(id: string, payload: any): Promise<void> {
     console.log(`[Orchestrator] runClawTask for ${id}`, payload);
+    const claw = _claws.get(id);
+    if (claw) {
+        (claw as any).lastStatus = 'Starting...';
+        (claw as any).lastError = null;
+        _notify();
+    }
     const port = await _initWorker();
+    // CRITICAL: Deep-clone payload to strip Svelte 5 Proxy wrappers.
+    // Proxy objects fail the structured clone algorithm used by postMessage.
+    const cleanPayload = JSON.parse(JSON.stringify({ clawId: id, ...payload }));
+    console.log(`[Orchestrator] 🚀 Dispatching RUN_TASK for ${id}. Payload keys: ${Object.keys(cleanPayload)}`);
     port.postMessage({
         type: 'RUN_TASK',
-        payload: { clawId: id, ...payload }
+        payload: cleanPayload
     });
 }
 

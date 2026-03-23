@@ -14,8 +14,8 @@ export const CLAW_DEFAULTS = {
     STATUS: 'running',
     TEMPERATURE: 0.7,
     MAX_ITERATIONS: 10,
-    PROVIDER: 'deepseek',
-    MODEL: 'deepseek-chat',
+    PROVIDER: 'zerogravity',
+    MODEL: 'gemini-3-flash',
     FALLBACK_PROVIDER: 'openrouter',
 };
 

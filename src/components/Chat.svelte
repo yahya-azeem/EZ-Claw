@@ -66,7 +66,7 @@
           messages = claw.messages;
           lastStatus = (claw as any).lastStatus;
           lastError = (claw as any).lastError;
-          isStreaming = claw.status === 'running' || !!lastStatus;
+          isStreaming = !!lastStatus;
         }
       });
       return unsub;
@@ -135,9 +135,6 @@
         role: "assistant",
         content: `❌ **Error:** ${err instanceof Error ? err.message : String(err)}`,
       }];
-    } finally {
-      isStreaming = false;
-      toolActivity = "";
     }
   }
 
@@ -257,7 +254,7 @@
       </button>
     </div>
     <div class="input-footer">
-      <span>Shift+Enter for new line • {getClaw(sessionId || "")?.provider || provider}/{getClaw(sessionId || "")?.model || model}</span>
+      <span>Shift+Enter for new line • {(getClaw(sessionId || "")?.provider === 'deepseek' ? CLAW_DEFAULTS.PROVIDER : (getClaw(sessionId || "")?.provider || provider))}/{(getClaw(sessionId || "")?.provider === 'deepseek' ? CLAW_DEFAULTS.MODEL : (getClaw(sessionId || "")?.model || model))}</span>
     </div>
   </div>
 </div>

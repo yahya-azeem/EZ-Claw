@@ -21,8 +21,10 @@ let dbPromise: Promise<IDBPDatabase> | null = null;
  */
 export function getDB(): Promise<IDBPDatabase> {
     if (!dbPromise) {
+        console.log(`[DB] Opening database ${DB_NAME} v${DB_VERSION}...`);
         dbPromise = openDB(DB_NAME, DB_VERSION, {
             upgrade(db) {
+                console.log(`[DB] Upgrading database ${DB_NAME} to v${DB_VERSION}...`);
                 // Sessions
                 if (!db.objectStoreNames.contains(STORES.SESSIONS)) {
                     const store = db.createObjectStore(STORES.SESSIONS, { keyPath: 'id' });
@@ -46,6 +48,8 @@ export function getDB(): Promise<IDBPDatabase> {
                 }
             }
         });
+        dbPromise.then(() => console.log(`[DB] Database ${DB_NAME} opened successfully`))
+                 .catch(err => console.error(`[DB] Database ${DB_NAME} failed to open:`, err));
     }
     return dbPromise;
 }

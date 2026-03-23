@@ -74,20 +74,20 @@ export interface EZClawAPI {
     chat(message: string, options?: ChatOptions): Promise<string>;
 
     // Identity
-    getIdentity(): AgentIdentity;
-    setIdentity(identity: Partial<AgentIdentity>): AgentIdentity;
-    getUser(): UserProfile;
-    setUser(user: Partial<UserProfile>): UserProfile;
+    getIdentity(): Promise<AgentIdentity>;
+    setIdentity(identity: Partial<AgentIdentity>): Promise<AgentIdentity>;
+    getUser(): Promise<UserProfile>;
+    setUser(user: Partial<UserProfile>): Promise<UserProfile>;
 
     // Personas
-    listPersonas(): PersonaEntry[];
-    getActivePersonaId(): string | null;
-    switchPersona(id: string): boolean;
-    createPersona(label: string, fromCurrent?: boolean): PersonaEntry;
-    deletePersona(id: string): boolean;
-    renamePersona(id: string, newLabel: string): boolean;
-    exportPersonas(): string;
-    importPersonas(json: string): number;
+    listPersonas(): Promise<PersonaEntry[]>;
+    getActivePersonaId(): Promise<string | null>;
+    switchPersona(id: string): Promise<boolean>;
+    createPersona(label: string, fromCurrent?: boolean): Promise<PersonaEntry>;
+    deletePersona(id: string): Promise<boolean>;
+    renamePersona(id: string, newLabel: string): Promise<boolean>;
+    exportPersonas(): Promise<string>;
+    importPersonas(json: string): Promise<number>;
 
     // Config
     getConfig(): Promise<EZClawConfig>;
@@ -108,8 +108,8 @@ let _sandbox: SandboxManager | null = null;
 let _workspace: any = null; // Shared WasmWorkspace singleton
 let _eventListeners: Map<string, Set<Function>> = new Map();
 let _config: EZClawConfig = {
-    provider: 'deepseek',
-    model: 'deepseek-chat',
+    provider: 'openrouter',
+    model: 'google/gemini-2.0-flash-exp:free',
     apiKey: '',
     temperature: 0.7,
     apiUrl: '',
@@ -204,9 +204,9 @@ const EZClaw: EZClawAPI = {
         // Build messages with identity and memories
         const messages: ChatMessage[] = [{ role: 'user', content: message }];
 
-        let identityPrompt = buildIdentityPrompt();
-        if (isFirstRun()) {
-            identityPrompt += '\n\n' + buildBootstrapPrompt();
+        let identityPrompt = await buildIdentityPrompt();
+        if (await isFirstRun()) {
+            identityPrompt += '\n\n' + await buildBootstrapPrompt();
         }
 
         let memoriesArr: string[] = [];
@@ -302,8 +302,8 @@ const EZClaw: EZClawAPI = {
         agent.free();
 
         // Handle first-run bootstrap completion
-        if (isFirstRun() && finalResponse.includes('bootstrapped')) {
-            markBootstrapped();
+        if (await isFirstRun() && finalResponse.includes('bootstrapped')) {
+            await markBootstrapped();
         }
 
         return finalResponse;
@@ -312,91 +312,91 @@ const EZClaw: EZClawAPI = {
     /**
      * Get the current agent identity.
      */
-    getIdentity(): AgentIdentity {
-        return loadIdentity();
+    async getIdentity(): Promise<AgentIdentity> {
+        return await loadIdentity();
     },
 
     /**
      * Update the agent identity.
      */
-    setIdentity(identity: Partial<AgentIdentity>): AgentIdentity {
-        const current = loadIdentity();
-        const updated = { ...current, ...identity, updatedAt: new Date().toISOString() };
-        saveIdentity(updated);
+    async setIdentity(identity: Partial<AgentIdentity>): Promise<AgentIdentity> {
+        const current = await loadIdentity();
+        const updated = { ...current, ...identity, updatedAt: new Date().toISOString() } as AgentIdentity;
+        await saveIdentity(updated);
         return updated;
     },
 
     /**
      * Get the current user profile.
      */
-    getUser(): UserProfile {
-        return loadUser();
+    async getUser(): Promise<UserProfile> {
+        return await loadUser();
     },
 
     /**
      * Update the user profile.
      */
-    setUser(user: Partial<UserProfile>): UserProfile {
-        const current = loadUser();
-        const updated = { ...current, ...user };
-        saveUser(updated);
+    async setUser(user: Partial<UserProfile>): Promise<UserProfile> {
+        const current = await loadUser();
+        const updated = { ...current, ...user } as UserProfile;
+        await saveUser(updated);
         return updated;
     },
 
     /**
      * List all saved personas.
      */
-    listPersonas(): PersonaEntry[] {
-        return listPersonas();
+    async listPersonas(): Promise<PersonaEntry[]> {
+        return await listPersonas();
     },
 
     /**
      * Get the active persona ID.
      */
-    getActivePersonaId(): string | null {
-        return getActivePersonaId();
+    async getActivePersonaId(): Promise<string | null> {
+        return await getActivePersonaId();
     },
 
     /**
      * Switch to a different persona.
      */
-    switchPersona(id: string): boolean {
-        return switchPersona(id);
+    async switchPersona(id: string): Promise<boolean> {
+        return await switchPersona(id);
     },
 
     /**
      * Create a new persona.
      */
-    createPersona(label: string, fromCurrent: boolean = false): PersonaEntry {
-        return createPersona(label, fromCurrent);
+    async createPersona(label: string, fromCurrent: boolean = false): Promise<PersonaEntry> {
+        return await createPersona(label, fromCurrent);
     },
 
     /**
      * Delete a persona.
      */
-    deletePersona(id: string): boolean {
-        return deletePersona(id);
+    async deletePersona(id: string): Promise<boolean> {
+        return await deletePersona(id);
     },
 
     /**
      * Rename a persona.
      */
-    renamePersona(id: string, newLabel: string): boolean {
-        return renamePersona(id, newLabel);
+    async renamePersona(id: string, newLabel: string): Promise<boolean> {
+        return await renamePersona(id, newLabel);
     },
 
     /**
      * Export all personas as JSON.
      */
-    exportPersonas(): string {
-        return exportPersonas();
+    async exportPersonas(): Promise<string> {
+        return await exportPersonas();
     },
 
     /**
      * Import personas from JSON.
      */
-    importPersonas(json: string): number {
-        return importPersonas(json);
+    async importPersonas(json: string): Promise<number> {
+        return await importPersonas(json);
     },
 
     /**
@@ -414,8 +414,12 @@ const EZClaw: EZClawAPI = {
         _config = { ..._config, ...config };
 
         // Persist to storage
-        if (config.provider !== undefined) await saveConfig('provider', config.provider);
-        if (config.model !== undefined) await saveConfig('model', config.model);
+        if (config.provider !== undefined) {
+            _config.provider = 'openrouter'; // Set provider to openrouter
+            await saveConfig('provider', _config.provider);
+        }
+        _config.model = 'google/gemini-2.0-flash-exp:free'; // Set model to gemini
+        await saveConfig('model', _config.model); // Save the hardcoded model
         if (config.apiKey !== undefined) await saveConfig('apiKey', config.apiKey);
         if (config.temperature !== undefined) await saveConfig('temperature', String(config.temperature));
         if (config.apiUrl !== undefined) await saveConfig('apiUrl', config.apiUrl || '');

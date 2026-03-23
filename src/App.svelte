@@ -98,14 +98,28 @@
 
       // sessions = await getAllSessions(); 
       // Removed redundant local DB load; rely on Orchestrator INIT/STATE_UPDATED
-      const workerClaws = getAllClaws();
-      if (workerClaws.length > 0) {
-        sessions = workerClaws;
-        if (!activeSessionId) activeSessionId = sessions[0].id;
-      }
+        // sessions = await getAllSessions(); 
+        // Removed redundant local DB load; rely on Orchestrator INIT/STATE_UPDATED
+        const workerClaws = getAllClaws();
+        if (workerClaws.length > 0) {
+          sessions = workerClaws;
+          
+          // Migrate old sessions
+          for (const s of sessions) {
+            if (s.provider === 'deepseek' || !isValidProvider(s.provider)) {
+              console.log(`[App] Migrating session ${s.id} from ${s.provider} to ${CLAW_DEFAULTS.PROVIDER}`);
+              updateClaw(s.id, {
+                provider: CLAW_DEFAULTS.PROVIDER,
+                model: CLAW_DEFAULTS.MODEL
+              });
+            }
+          }
+          
+          if (!activeSessionId) activeSessionId = sessions[0].id;
+        }
 
-      if (!apiKey) showOnboarding = true;
-      loading = false;
+        if (!apiKey) showOnboarding = true;
+        loading = false;
     } catch (err) {
       console.error("[EZ-Claw] Bootstrap Failed:", err);
       initError = `Init failed: ${err instanceof Error ? err.message : String(err)}`;

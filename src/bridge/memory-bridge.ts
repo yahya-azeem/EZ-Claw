@@ -27,8 +27,11 @@ let memories: MemoryEntry[] = [];
 
 async function loadFromIDB(): Promise<MemoryEntry[]> {
     try {
+        console.log('[Memory] loadFromIDB: Opening DB...');
         const db = await getDB();
+        console.log('[Memory] loadFromIDB: Fetching memories...');
         const data = await db.get(STORES.MEMORIES, 'all_memories');
+        console.log(`[Memory] loadFromIDB: Fetched ${data?.length || 0} entries`);
         return data || [];
     } catch (e) {
         console.warn('[EZ-Claw] Memory load from IndexedDB failed:', e);

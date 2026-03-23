@@ -42,12 +42,6 @@
             builtin: true,
         },
         {
-            domain: "api.deepseek.com",
-            path: "/*",
-            label: "DeepSeek",
-            builtin: true,
-        },
-        {
             domain: "openrouter.ai",
             path: "/api/*",
             label: "OpenRouter",

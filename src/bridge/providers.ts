@@ -23,32 +23,22 @@ export interface ProviderDef {
 
 export const PROVIDERS: ProviderDef[] = [
     {
-        id: 'deepseek',
-        name: 'DeepSeek',
-        defaultModel: 'deepseek-chat',
-        models: ['deepseek-chat', 'deepseek-reasoner'],
-        modelLabels: ['DeepSeek V3-0324', 'DeepSeek R1'],
-        free: true,
-    },
-    {
         id: 'openrouter',
         name: 'OpenRouter',
-        defaultModel: 'deepseek/deepseek-chat',
+        defaultModel: 'google/gemini-2.0-flash-exp:free',
         models: [
-            'deepseek/deepseek-chat',
-            'deepseek/deepseek-r1',
-            'google/gemini-2.5-flash-preview',
-            'google/gemini-2.5-pro-preview',
+            'google/gemini-2.0-flash-exp:free',
+            'anthropic/claude-3.5-sonnet',
+            'meta-llama/llama-3.3-70b-instruct',
             'meta-llama/llama-4-maverick:free',
             'qwen/qwen3-235b-a22b',
             'anthropic/claude-sonnet-4-20250514',
             'openai/gpt-4.1',
         ],
         modelLabels: [
-            'DeepSeek V3-0324 (Free)',
-            'DeepSeek R1 (Free)',
-            'Gemini 2.5 Flash Preview',
-            'Gemini 2.5 Pro Preview',
+            'Gemini 2.0 Flash (Free)',
+            'Claude 3.5 Sonnet',
+            'Llama 3.3 70B',
             'Llama 4 Maverick (Free)',
             'Qwen 3 235B-A22B',
             'Claude Sonnet 4',
@@ -123,19 +113,9 @@ export const PROVIDERS: ProviderDef[] = [
     {
         id: 'zerogravity',
         name: 'ZeroGravity (Antigravity)',
-        defaultModel: 'sonnet-4.6',
-        models: [
-            'opus-4.6', 'sonnet-4.6',
-            'gemini-3-flash', 'gemini-3.1-pro',
-            'gemini-3.1-pro-high', 'gemini-3.1-pro-low',
-            'gemini-3-pro-image',
-        ],
-        modelLabels: [
-            'Claude Opus 4.6', 'Claude Sonnet 4.6',
-            'Gemini 3 Flash', 'Gemini 3.1 Pro',
-            'Gemini 3.1 Pro (High)', 'Gemini 3.1 Pro (Low)',
-            'Gemini 3 Pro (Images)',
-        ],
+        defaultModel: 'gemini-3-flash',
+        models: ['gemini-3-flash', 'sonnet-4.6', 'sonnet-4.0', 'opus-3.8', 'haiku-4.2'],
+        modelLabels: ['Gemini 3 Flash (Fast)', 'Sonnet 4.6 (Intelligence)', 'Sonnet 4.0', 'Opus 3.8 (Infinite)', 'Haiku 4.2 (Speed)'],
         free: false,
         defaultApiUrl: 'http://localhost:8741/v1',
     },
@@ -148,7 +128,7 @@ export function getProvider(id: string): ProviderDef | undefined {
 }
 
 export function getDefaultModel(providerId: string): string {
-    return getProvider(providerId)?.defaultModel || 'deepseek-chat';
+    return getProvider(providerId)?.defaultModel || 'google/gemini-2.0-flash-exp:free';
 }
 
 export function getValidModels(providerId: string): string[] {

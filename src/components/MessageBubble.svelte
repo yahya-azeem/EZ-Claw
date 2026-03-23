@@ -23,6 +23,8 @@
       .replace(/\*(.+?)\*/g, '<em>$1</em>')
       // Links
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+      // Thought/Reasoning blocks
+      .replace(/<thought>([\s\S]*?)<\/thought>/g, '<div class="thought-block"><div class="thought-header"><span class="thought-icon">🧠</span> Reasoning</div><div class="thought-content">$1</div></div>')
       // Line breaks
       .replace(/\n/g, '<br>');
 
@@ -274,5 +276,35 @@
   @keyframes typing {
     0%, 60%, 100% { transform: translateY(0); opacity: 0.6; }
     30% { transform: translateY(-4px); opacity: 1; }
+  }
+  
+  :global(.thought-block) {
+    margin: var(--space-md) 0;
+    background: rgba(139, 92, 246, 0.03);
+    border: 1px solid var(--border-subtle);
+    border-left: 3px solid #8b5cf6;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    font-size: 0.9em;
+  }
+
+  :global(.thought-header) {
+    padding: var(--space-xs) var(--space-sm);
+    background: rgba(139, 92, 246, 0.08);
+    color: #a78bfa;
+    font-weight: 600;
+    font-size: 0.8em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  :global(.thought-content) {
+    padding: var(--space-sm) var(--space-md);
+    color: var(--text-secondary);
+    font-style: italic;
+    line-height: 1.6;
   }
 </style>

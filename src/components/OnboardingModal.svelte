@@ -10,23 +10,14 @@
   let { onComplete }: Props = $props();
 
   let step = $state(1);
-  let selectedProvider = $state("deepseek");
+  let selectedProvider = $state("openrouter");
   let apiKey = $state("");
-  let selectedModel = $state("deepseek-chat");
+  let selectedModel = $state("google/gemini-2.0-flash-exp:free");
 
   const providers = [
     {
-      id: "deepseek",
-      name: "DeepSeek",
-      icon: "🧠",
-      description: "Powerful & affordable AI",
-      defaultModel: "deepseek-chat",
-      free: true,
-      signupUrl: "https://platform.deepseek.com/",
-    },
-    {
       id: "openrouter",
-      name: "OpenRouter",
+      name: "OpenRouter (Recommended)",
       icon: "🌐",
       description: "100+ models, one API",
       defaultModel: "deepseek/deepseek-chat",
